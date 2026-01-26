@@ -1,0 +1,164 @@
+# =============================================================================
+# SentinelX Docker Compose - Production Stack
+# =============================================================================
+# Launch: docker-compose up --build
+# Stop:   docker-compose down
+# Logs:   docker-compose logs -f api
+#
+# Services:
+#   - db:        PostgreSQL 15 (Digital Twin of AWS RDS)
+#   - api:       FastAPI + XGBoost inference engine
+#   - dashboard: Streamlit CEO dashboard
+#
+# Network: All services communicate via 'sentinelx-network'
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # PostgreSQL Database (AWS RDS Digital Twin)
+  # ===========================================================================
+  # WHY PostgreSQL 15?
+  # - JSONB support for raw_data and shap_values columns
+  # - Same version available on AWS RDS
+  # - Optimized for OLTP workloads (alert writes)
+  db:
+    image: postgres:15-alpine
+    container_name: sentinelx-db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: sentinelx
+      POSTGRES_PASSWORD: sentinelx_secure_2024
+      POSTGRES_DB: sentinelx
+      # Performance tuning (matches RDS db.t3.medium defaults)
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+
+    volumes:
+      # Persist data across container restarts
+      - sentinelx-postgres-data:/var/lib/postgresql/data
+      # Optional: custom init scripts
+      # - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+    ports:
+      # Expose for local development tools (DBeaver, psql)
+      - "5432:5432"
+
+    networks:
+      - sentinelx-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinelx -d sentinelx"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ===========================================================================
+  # FastAPI Inference Service (AWS ECS Fargate Digital Twin)
+  # ===========================================================================
+  # WHY separate from dashboard?
+  # - API handles high-throughput prediction requests
+  # - Dashboard is read-heavy visualization
+  # - Independent scaling in production (ECS service per container)
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: production
+    container_name: sentinelx-api
+    restart: unless-stopped
+
+    environment:
+      # Database connection (uses Docker network hostname)
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: sentinelx
+      DB_USER: sentinelx
+      DB_PASS: sentinelx_secure_2024
+      # API settings
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      LOG_LEVEL: INFO
+      # Model paths (inside container)
+      MODEL_PATH: models/model.joblib
+      FEATURE_NAMES_PATH: models/feature_names.json
+      THRESHOLDS_PATH: models/evaluation_results.json
+      # Ollama LLM Configuration (Local LLM Agent)
+      # host.docker.internal allows container to reach host machine's Ollama
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: llama3.2
+      OLLAMA_TIMEOUT: 60
+
+    ports:
+      - "8000:8000"
+
+    networks:
+      - sentinelx-network
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===========================================================================
+  # Streamlit CEO Dashboard
+  # ===========================================================================
+  # WHY Streamlit?
+  # - Rapid prototyping for data visualization
+  # - Python-native (same stack as ML pipeline)
+  # - Easy to hand off to data scientists
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dashboard
+    container_name: sentinelx-dashboard
+    restart: unless-stopped
+
+    environment:
+      # Database connection for direct SQL queries
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: sentinelx
+      DB_USER: sentinelx
+      DB_PASS: sentinelx_secure_2024
+      # API endpoint for live predictions
+      API_URL: http://api:8000
+
+    ports:
+      - "8501:8501"
+
+    networks:
+      - sentinelx-network
+
+    depends_on:
+      - api
+      - db
+
+# =============================================================================
+# Networks
+# =============================================================================
+# WHY custom bridge network?
+# - Service discovery: containers can reach each other by name (db, api)
+# - Isolation: SentinelX services don't conflict with other Docker apps
+# - Mirrors AWS VPC private subnet behavior
+networks:
+  sentinelx-network:
+    driver: bridge
+    name: sentinelx-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+# WHY named volume?
+# - Data persists across `docker-compose down` and `up`
+# - Easy backup: `docker run --rm -v sentinelx-postgres-data:/data -v $(pwd):/backup alpine tar cvf /backup/db-backup.tar /data`
+# - Mirrors AWS RDS persistent storage
+volumes:
+  sentinelx-postgres-data:
+    name: sentinelx-postgres-data

@@ -1,0 +1,84 @@
+# =============================================================================
+# SentinelX Production Dockerfile
+# =============================================================================
+# Multi-stage build for optimized image size
+# Final image: ~1.2GB (includes ML libraries)
+#
+# Build: docker build -t sentinelx-api .
+# Run:   docker run -p 8000:8000 sentinelx-api
+# =============================================================================
+
+FROM python:3.11-slim AS base
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Install system dependencies
+# - libpq-dev: PostgreSQL client library (required for psycopg2)
+# - curl: Health check probe
+# - build-essential: Compile native extensions (numpy, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
+# Dependencies Stage
+# =============================================================================
+FROM base AS dependencies
+
+# Copy and install requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# =============================================================================
+# Production Stage
+# =============================================================================
+FROM dependencies AS production
+
+# Copy application code
+COPY src/api/main.py .
+COPY src/api/database.py .
+COPY src/ml/agent.py .
+COPY src/ml/feature_engineer.py .
+COPY src/pipeline/stream_manager.py .
+
+# Copy model artifacts (required for inference)
+COPY models/ ./models/
+
+# Copy data directory structure (for feature engineering)
+COPY data/ ./data/
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash sentinelx && \
+    chown -R sentinelx:sentinelx /app
+USER sentinelx
+
+# Expose API port
+EXPOSE 8000
+
+# Health check for container orchestration
+# Checks /health endpoint every 30 seconds
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Default command: production uvicorn with multiple workers
+# Workers = 2 * CPU cores + 1 (will be 4 workers on 2-core Fargate)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+
+# =============================================================================
+# Development Stage (optional, for local debugging)
+# =============================================================================
+FROM dependencies AS development
+
+# Copy all source files
+COPY . .
+
+# Development mode: single worker with auto-reload
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

@@ -1,0 +1,8 @@
+{
+  "best_val_loss": 0.17978891965590024,
+  "final_epoch": 100,
+  "n_healthy_train": 37916,
+  "n_healthy_val": 9479,
+  "input_dim": 124,
+  "latent_dim": 16
+}

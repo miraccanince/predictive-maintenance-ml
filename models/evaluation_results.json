@@ -1,0 +1,37 @@
+{
+  "pr_auc": 0.8607051638136759,
+  "thresholds": {
+    "ultra_safe": {
+      "threshold": 0.9368997812271118,
+      "precision": 0.9000713775874375,
+      "recall": 0.48406909788867564
+    },
+    "balanced": {
+      "threshold": 0.6335676312446594,
+      "precision": 0.7592527317589003,
+      "recall": 0.8268714011516315,
+      "f1": 0.7916207226827368
+    },
+    "sensitive": {
+      "threshold": 0.21689960360527039,
+      "precision": 0.6141439205955335,
+      "recall": 0.9500959692898272
+    },
+    "cost_optimal": {
+      "threshold": 0.21689960360527039,
+      "net_savings": 11597500.0,
+      "tp": 2475,
+      "fp": 1555,
+      "fn": 130,
+      "tn": 45840
+    }
+  },
+  "cost_assumptions": {
+    "fp_cost": 500,
+    "fn_cost": 5000
+  },
+  "paper3_comparison": {
+    "industry_fp_rate": 54.0,
+    "sentinelx_fp_rate": 1.4410802827302458
+  }
+}

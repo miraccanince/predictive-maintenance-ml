@@ -1,0 +1,48 @@
+# =============================================================================
+# SentinelX Dashboard Dockerfile (Streamlit)
+# =============================================================================
+# Lightweight image for the CEO visualization dashboard
+# =============================================================================
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (dashboard subset)
+RUN pip install --no-cache-dir \
+    streamlit==1.31.0 \
+    plotly==5.18.0 \
+    pandas==2.1.4 \
+    numpy==1.26.3 \
+    sqlalchemy==2.0.25 \
+    psycopg2-binary==2.9.9 \
+    python-dotenv==1.0.0 \
+    requests==2.31.0 \
+    altair==5.2.0
+
+# Copy dashboard application
+COPY src/dashboard/dashboard.py .
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash dashboard && \
+    chown -R dashboard:dashboard /app
+USER dashboard
+
+# Expose Streamlit default port
+EXPOSE 8501
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+
+# Run Streamlit
+CMD ["streamlit", "run", "dashboard.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]

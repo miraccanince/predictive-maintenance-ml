@@ -1,0 +1,31 @@
+{
+  "name": "sentinelx-tests",
+  "version": "1.0.0",
+  "description": "Playwright E2E tests for SentinelX",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:chromium": "playwright test --project=chromium",
+    "test:api": "playwright test tests/api.spec.ts",
+    "test:dashboard": "playwright test tests/dashboard.spec.ts",
+    "test:debug": "playwright test --debug",
+
+    "report": "playwright show-report",
+    "report:open": "open playwright-report/index.html",
+    "report:json": "cat test-results/results.json | python3 -m json.tool",
+
+    "clean": "rm -rf test-results playwright-report",
+    "clean:all": "rm -rf test-results playwright-report node_modules"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.41.0",
+    "@types/node": "^20.10.0"
+  },
+  "keywords": [
+    "playwright",
+    "testing",
+    "e2e",
+    "sentinelx"
+  ]
+}

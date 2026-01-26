@@ -1,0 +1,26 @@
+{
+    "system": {
+        "machine_id": "M1",
+        "air_temperature_K": 315.5,
+        "process_temperature_K": 323.2,
+        "rotational_speed_rpm": 1650,
+        "torque_Nm": 58.3,
+        "tool_wear_min": 200,
+        "vibration_mm_s": 32.5,
+        "pressure_psi": 135.0,
+        "network_latency_ms": 55.0,
+        "edge_processing_time_ms": 22.0,
+        "fuzzy_pid_output": 0.78
+    },
+    "application": {
+        "error_rate_pct": 18.5,
+        "cpu_utilization_pct": 92.0,
+        "memory_utilization_pct": 78.0,
+        "disk_io_wait_ms": 35.0,
+        "packet_loss_pct": 3.2,
+        "api_response_latency_ms": 320.0,
+        "http_5xx_count": 18,
+        "queue_depth": 65,
+        "request_throughput_rps": 72.0
+    }
+}

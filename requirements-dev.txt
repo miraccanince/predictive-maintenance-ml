@@ -1,0 +1,28 @@
+# Development dependencies for SentinelX
+# Install with: pip install -r requirements-dev.txt
+
+# Include base requirements
+-r requirements.txt
+
+# ==================== Testing ====================
+pytest>=8.0.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.23.0
+httpx>=0.26.0
+
+# ==================== Linting & Formatting ====================
+ruff>=0.1.14
+black>=24.1.0
+isort>=5.13.0
+
+# ==================== Security ====================
+bandit>=1.7.7
+safety>=2.3.5
+
+# ==================== Type Checking (optional) ====================
+# mypy>=1.8.0
+# types-requests>=2.31.0
+
+# ==================== Documentation ====================
+# mkdocs>=1.5.3
+# mkdocs-material>=9.5.0

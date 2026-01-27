@@ -28,7 +28,7 @@ SentinelX is a **complete AIOps platform** for predictive maintenance, built acr
 **Key Achievements:**
 - **1.4% False Positive Rate** (vs 54% industry baseline - Paper 3)
 - **97% Alert Fatigue Reduction** through SHAP explainability
-- **$120.9M Annual Savings** projection based on failure costs
+- **Projected annual savings under industry assumptions** projection based on failure costs
 - **65 E2E Tests** via Playwright (API + Dashboard)
 - **Docker-ready** with AWS ECS migration path
 - **LLM-Powered Diagnostics** via Ollama (llama3.2) with automatic fallback

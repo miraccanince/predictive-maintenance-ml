@@ -54,7 +54,7 @@ docker-compose -f docker/docker-compose.yml up --build
 
 ---
 
-## 📊 The $120.9M Value Proposition
+## 📊 Value Proposition
 
 Based on **Paper 3** research, SentinelX delivers massive ROI through Alert Fatigue reduction:
 

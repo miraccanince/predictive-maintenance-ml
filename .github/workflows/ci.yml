@@ -220,7 +220,7 @@ jobs:
           import json
           with open('models/cv_metrics.json') as f:
               metrics = json.load(f)
-          pr_auc = metrics.get('mean_pr_auc', 0)
+          pr_auc = metrics.get('pr_auc_mean', 0)
           print(f'✓ Mean PR-AUC: {pr_auc:.4f}')
           assert pr_auc > 0.5, 'PR-AUC should be > 0.5'
           print('✓ Model performance validation passed')

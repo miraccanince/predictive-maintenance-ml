@@ -9,6 +9,8 @@ SentinelX is a production-grade AIOps platform for predictive maintenance. It in
 
 The core problem it addresses: industrial monitoring systems generate too many false alerts. Operators start ignoring them. Real failures get missed. SentinelX brings the false positive rate from the 54% industry average down to 1.4% by combining cross-domain feature fusion, proper imbalance handling, and explainable predictions that operators can actually trust.
 
+The implementation is grounded in four research papers covering hybrid ML architectures, imbalanced classification, alert fatigue, and real-time data quality. See the [Literature](#literature) section for details.
+
 ---
 
 ## Project Summary
@@ -24,7 +26,7 @@ The pipeline is built across 9 stages:
 | 5 | Evaluation | PR-AUC optimization, threshold calibration at 500K scale |
 | 6 | Diagnostic Agent | SHAP-powered explainability engine |
 | 7 | API + Persistence | FastAPI service + PostgreSQL with alert fatigue tracking |
-| 8 | Dashboard | Streamlit visualization of savings and alert metrics |
+| 8 | Dashboard | Streamlit visualization of alert metrics and model performance |
 | 9 | LLM Agent | Ollama-powered generative diagnostics with chain-of-thought |
 
 **Results:**
@@ -51,26 +53,6 @@ Three services start:
 | API | http://localhost:8000 | FastAPI inference engine |
 | Dashboard | http://localhost:8501 | Streamlit metrics dashboard |
 | Database | localhost:5432 | PostgreSQL alert storage |
-
----
-
-## Value Proposition
-
-Based on Paper 3 cost assumptions ($5,000 per missed failure, $500 per unnecessary maintenance):
-
-```
-Industry Baseline (54% False Positive Rate)
-  Operators ignore 73% of alerts (alert fatigue)
-  Missed failures cost: $5,000 each
-  Unnecessary maintenance: $500 each
-
-SentinelX (1.4% False Positive Rate)
-  97% reduction in false alarms
-  95% failure detection rate (recall)
-  SHAP explanations build operator trust
-
-  NET ANNUAL SAVINGS: $120,900,000
-```
 
 ---
 
@@ -110,7 +92,7 @@ SentinelX (1.4% False Positive Rate)
 | 5 | `src/ml/evaluate_and_scale.py` | PR-AUC evaluation, threshold optimization |
 | 6 | `src/ml/agent.py` | SHAP-powered diagnostic engine |
 | 7 | `src/api/main.py` + `database.py` | FastAPI service + PostgreSQL |
-| 8 | `src/dashboard/dashboard.py` | Metrics and savings dashboard |
+| 8 | `src/dashboard/dashboard.py` | Alert metrics and model performance dashboard |
 
 ---
 
@@ -321,9 +303,7 @@ See [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) for the full walkthrough.
 
 The Streamlit dashboard at http://localhost:8501 includes:
 
-**Savings counter** — real-time calculation of avoided costs versus industry baseline, with annual projection based on current alert rate.
-
-**Alert fatigue monitor** — tracks the 1.4% vs 54% FP rate comparison, acknowledgment rate, and Paper 3 compliance metrics over configurable time windows.
+**Alert fatigue monitor** — tracks the 1.4% vs 54% FP rate comparison, acknowledgment rate, and false positive labeling over configurable time windows.
 
 **Root cause breakdown** — distribution by failure mode (mechanical, thermal, software), risk level counts, and a 24-hour alert timeline.
 
@@ -382,14 +362,41 @@ SentinelX/
 
 ---
 
-## Research Foundation
+## Literature
 
-| Paper | Contribution | Implementation |
-|-------|--------------|----------------|
-| Paper 1 | SOFM+SVM hybrid | Cross-domain feature fusion (thermal_efficiency_idx, power_anomaly_score) |
-| Paper 2 | XGBoost+SMOTE | Imbalanced classification, SMOTE inside CV loop |
-| Paper 3 | Alert fatigue | 1.4% FP rate, SHAP for operator trust |
-| Paper 4 | Real-time quality | Streaming with in-stream quality gates and PSI drift detection |
+SentinelX is built on four papers, each addressing a different layer of the pipeline. The full PDFs are in `papers/`.
+
+---
+
+**Paper 1 — A Hybrid Machine Learning Approach**
+
+This paper introduces a hybrid architecture combining Self-Organizing Feature Maps (SOFM) and Support Vector Machines (SVM) for multi-modal anomaly detection. The central argument is that hardware and software signals carry complementary failure information — neither domain alone is sufficient. Fusing them at the feature level, rather than at the decision level, captures cross-domain causal chains that single-modality models miss entirely.
+
+In SentinelX this translates directly into the cross-domain feature set: `thermal_efficiency_idx` (CPU utilization normalized by temperature), `power_anomaly_score` (deviation from expected mechanical power curve), and `error_under_stress` (error rate conditioned on high torque). These features encode physical relationships between hardware state and software behavior that standard tabular features cannot represent. The SHAP analysis confirms these cross-domain features rank consistently in the top-15 most influential predictors.
+
+---
+
+**Paper 2 — Anomaly Detection with XGBoost and SMOTE for Imbalanced Industrial Data**
+
+This paper addresses the class imbalance problem in industrial fault detection, where failure events typically represent less than 5% of observations. It benchmarks several oversampling and algorithmic approaches and recommends XGBoost with SMOTE applied strictly within cross-validation folds. The key finding is that applying SMOTE before splitting — a common shortcut — produces optimistic performance estimates because synthetic minority samples generated from the full dataset contaminate the validation set.
+
+SentinelX implements this protocol exactly: SMOTE is called inside each fold of Stratified K-Fold CV, never on the full dataset. The paper also informs the choice of `sampling_strategy=0.5` (not full balance at 1.0) to preserve the model's awareness that failures are rare, and `scale_pos_weight=1.0` in XGBoost to avoid double-correcting for imbalance when SMOTE is already applied. PR-AUC is used as the primary evaluation metric throughout, as the paper demonstrates that ROC-AUC is misleading at this class ratio.
+
+---
+
+**Paper 3 — Alert Fatigue in Industrial Monitoring Systems**
+
+This paper quantifies the alert fatigue problem in production monitoring environments. It establishes that the industry average false positive rate in anomaly detection systems sits around 54%, and that at this level operators begin ignoring alerts systematically — with 73% of alerts going unacknowledged. The downstream effect is that genuine failures get missed not because the model failed to detect them, but because the operator no longer trusts the system. The paper proposes SHAP-based explanations as a trust-building mechanism: when operators understand why an alert fired, they engage with it more reliably.
+
+This directly shapes SentinelX's design goals (1.4% FP target), its database schema (the `acknowledged`, `false_positive`, and `action_taken` columns exist specifically to measure and track operator response), and the `/fatigue` API endpoint that surfaces acknowledgment rates and FP rates over time. The SHAP diagnostic report attached to every prediction is the implementation of the paper's explainability recommendation.
+
+---
+
+**Paper 4 — Deep Learning-Based Real-Time Data Quality Assessment**
+
+This paper argues that data quality assessment must happen in-stream rather than as a batch post-processing step. By the time a batch quality check catches a corrupted sensor reading, the model has already ingested and acted on it. The paper proposes physics-based bounds (not statistical outlier thresholds) as quality gates — values outside physically possible ranges are definitively sensor errors, not anomalies. It also introduces Population Stability Index (PSI) as a lightweight, stateless distribution shift detector suitable for streaming contexts, with PSI > 0.2 as the threshold for triggering retraining.
+
+SentinelX's `QualityGate` class implements the in-stream flagging pattern: rows are annotated with a bitwise quality flag rather than dropped, preserving rare failure events that would otherwise be discarded. The `DriftMonitor` class implements PSI per column against a fixed baseline, logging a warning when any column exceeds the threshold. The chunk boundary lookback buffer — which ensures rolling window features computed at chunk boundaries have the same historical context as features computed mid-chunk — is a direct response to the paper's requirement that streaming feature computation produce identical results to batch computation.
 
 ---
 

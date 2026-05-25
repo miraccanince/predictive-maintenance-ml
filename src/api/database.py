@@ -18,20 +18,29 @@ Reference: Paper 3 - Store metadata to analyze 'Alert Fatigue' patterns:
 - Which thresholds generate the most noise?
 """
 
-import os
 import json
 import logging
+import os
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
 
+from dotenv import load_dotenv
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, DateTime,
-    Text, Boolean, Index, func, text
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
-from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
@@ -80,7 +89,7 @@ engine = create_engine(
     pool_size=5,
     max_overflow=10,
     pool_pre_ping=True,  # Prevents "connection reset" errors
-    echo=False  # Set True for SQL debugging
+    echo=False,  # Set True for SQL debugging
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -92,6 +101,7 @@ Base = declarative_base()
 # 3. ORM MODELS
 # =============================================================================
 # Reference: Paper 3 - Alert Fatigue Analysis requires rich metadata
+
 
 class Alert(Base):
     """
@@ -108,6 +118,7 @@ class Alert(Base):
     - root_cause: Group alerts by diagnosed cause
     - created_at: Time-series analysis of alert frequency
     """
+
     __tablename__ = "alerts"
 
     # Primary Key
@@ -146,14 +157,14 @@ class Alert(Base):
     # Composite indexes for common queries
     __table_args__ = (
         # Alert Fatigue query: alerts per machine per day
-        Index('ix_alerts_machine_date', machine_id, func.date(timestamp)),
+        Index("ix_alerts_machine_date", machine_id, func.date(timestamp)),
         # FP analysis: filter by root cause + FP label
-        Index('ix_alerts_rootcause_fp', root_cause, false_positive),
+        Index("ix_alerts_rootcause_fp", root_cause, false_positive),
         # Time-series: recent high-risk alerts
-        Index('ix_alerts_risk_time', risk_level, created_at.desc()),
+        Index("ix_alerts_risk_time", risk_level, created_at.desc()),
     )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "id": self.id,
@@ -185,6 +196,7 @@ class AlertFatigueMetrics(Base):
     - Without aggregates: Scan millions of rows → 10+ seconds
     - With aggregates: 30 rows → 5ms
     """
+
     __tablename__ = "alert_fatigue_metrics"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -207,14 +219,13 @@ class AlertFatigueMetrics(Base):
     # Root cause distribution
     root_cause_distribution = Column(JSONB, nullable=True)
 
-    __table_args__ = (
-        Index('ix_fatigue_date_machine', date, machine_id, unique=True),
-    )
+    __table_args__ = (Index("ix_fatigue_date_machine", date, machine_id, unique=True),)
 
 
 # =============================================================================
 # 4. DATABASE OPERATIONS (CRUD)
 # =============================================================================
+
 
 def get_db() -> Session:
     """
@@ -252,13 +263,13 @@ def create_alert(
     timestamp: datetime,
     failure_prob: float,
     risk_level: str,
-    root_cause: Optional[str],
-    confidence: Optional[str],
+    root_cause: str | None,
+    confidence: str | None,
     report_md: str,
-    raw_data: Dict[str, Any],
-    shap_values: Optional[Dict[str, Any]] = None,
-    threshold_used: Optional[str] = None,
-    model_version: str = "1.0"
+    raw_data: dict[str, Any],
+    shap_values: dict[str, Any] | None = None,
+    threshold_used: str | None = None,
+    model_version: str = "1.0",
 ) -> Alert:
     """
     Create a new alert record.
@@ -291,7 +302,7 @@ def create_alert(
         raw_data=raw_data,
         shap_values=shap_values,
         threshold_used=threshold_used,
-        model_version=model_version
+        model_version=model_version,
     )
 
     db.add(alert)
@@ -304,11 +315,11 @@ def create_alert(
 
 def get_alerts(
     db: Session,
-    machine_id: Optional[str] = None,
-    risk_level: Optional[str] = None,
+    machine_id: str | None = None,
+    risk_level: str | None = None,
     limit: int = 100,
-    offset: int = 0
-) -> List[Alert]:
+    offset: int = 0,
+) -> list[Alert]:
     """
     Query alerts with optional filters.
 
@@ -333,10 +344,8 @@ def get_alerts(
 
 
 def get_alert_fatigue_summary(
-    db: Session,
-    machine_id: Optional[str] = None,
-    days: int = 7
-) -> Dict[str, Any]:
+    db: Session, machine_id: str | None = None, days: int = 7
+) -> dict[str, Any]:
     """
     Calculate Alert Fatigue metrics (Paper 3).
 
@@ -351,6 +360,7 @@ def get_alert_fatigue_summary(
         Dict with fatigue metrics
     """
     from datetime import timedelta
+
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     query = db.query(Alert).filter(Alert.created_at >= cutoff)
@@ -396,9 +406,9 @@ def acknowledge_alert(
     db: Session,
     alert_id: int,
     acknowledged_by: str,
-    action_taken: Optional[str] = None,
-    is_false_positive: Optional[bool] = None
-) -> Optional[Alert]:
+    action_taken: str | None = None,
+    is_false_positive: bool | None = None,
+) -> Alert | None:
     """
     Mark an alert as acknowledged (for Alert Fatigue tracking).
 
@@ -436,7 +446,8 @@ def acknowledge_alert(
 # 5. HEALTH CHECK
 # =============================================================================
 
-def check_db_health() -> Dict[str, Any]:
+
+def check_db_health() -> dict[str, Any]:
     """
     Database health check for /health endpoint.
 
@@ -446,7 +457,7 @@ def check_db_health() -> Dict[str, Any]:
     try:
         db = SessionLocal()
         # Simple query to verify connection
-        result = db.execute(text("SELECT 1")).fetchone()
+        db.execute(text("SELECT 1")).fetchone()
 
         # Get table stats
         alert_count = db.query(Alert).count()
@@ -457,14 +468,11 @@ def check_db_health() -> Dict[str, Any]:
             "status": "healthy",
             "database": f"{DB_HOST}:{DB_PORT}/{DB_NAME}",
             "connection_pool": f"{engine.pool.size()}/{engine.pool.size() + engine.pool.overflow()}",
-            "alert_count": alert_count
+            "alert_count": alert_count,
         }
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
+        return {"status": "unhealthy", "error": str(e)}
 
 
 # =============================================================================

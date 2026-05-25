@@ -22,17 +22,14 @@ Data Leakage Prevention:
 - min_periods enforced: early rows get NaN, not padded future data
 """
 
+import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SentinelX.FeatureEngineer")
 
 
@@ -44,6 +41,7 @@ logger = logging.getLogger("SentinelX.FeatureEngineer")
 #   feature config (window sizes, lag depths) change independently.
 # - Experiment Tracking: when we tune window_sizes, we log THIS config
 #   to MLflow/W&B without touching the ingestion layer.
+
 
 @dataclass
 class FeatureConfig:
@@ -58,7 +56,7 @@ class FeatureConfig:
     # System metrics are the CLOCK — they arrive at fixed 5-min intervals.
     # Application logs are event-driven (a request may or may not happen).
     # Left join preserves every system observation, filling gaps in app data.
-    join_keys: List[str] = field(default_factory=lambda: ["timestamp", "machine_id"])
+    join_keys: list[str] = field(default_factory=lambda: ["timestamp", "machine_id"])
 
     # --- Rolling Window Sizes (in number of periods) ---
     # WHY these specific sizes?
@@ -71,7 +69,7 @@ class FeatureConfig:
     #     memory leaks. Captures "something is wrong."
     #   - 36 periods (3 hr): Trend context — seasonal baseline shift,
     #     gradual wear. Captures "is this normal for this time of day?"
-    rolling_windows: List[int] = field(default_factory=lambda: [6, 12, 36])
+    rolling_windows: list[int] = field(default_factory=lambda: [6, 12, 36])
 
     # --- Lag Depths (in number of periods) ---
     # WHY lags specifically at 1, 2, 6?
@@ -81,31 +79,35 @@ class FeatureConfig:
     #   - T-1 (5 min):  Immediate cause-effect (direct mechanical failure)
     #   - T-2 (10 min): Thermal propagation delay
     #   - T-6 (30 min): Cascading system-level degradation
-    lag_periods: List[int] = field(default_factory=lambda: [1, 2, 6])
+    lag_periods: list[int] = field(default_factory=lambda: [1, 2, 6])
 
     # --- Feature Column Groups ---
     # WHY separate hardware vs software?
     # Paper 1: The "hybrid" innovation is EXPLICITLY correlating these domains.
     # If we mixed them from the start, we couldn't create meaningful
     # cross-domain interaction features.
-    hardware_rolling_cols: List[str] = field(default_factory=lambda: [
-        "air_temperature_K",
-        "process_temperature_K",
-        "torque_Nm",
-        "rotational_speed_rpm",
-        "vibration_mm_s",
-        "pressure_psi",
-        "tool_wear_min",
-    ])
+    hardware_rolling_cols: list[str] = field(
+        default_factory=lambda: [
+            "air_temperature_K",
+            "process_temperature_K",
+            "torque_Nm",
+            "rotational_speed_rpm",
+            "vibration_mm_s",
+            "pressure_psi",
+            "tool_wear_min",
+        ]
+    )
 
-    software_rolling_cols: List[str] = field(default_factory=lambda: [
-        "api_response_latency_ms",
-        "error_rate_pct",
-        "cpu_utilization_pct",
-        "memory_utilization_pct",
-        "queue_depth",
-        "disk_io_wait_ms",
-    ])
+    software_rolling_cols: list[str] = field(
+        default_factory=lambda: [
+            "api_response_latency_ms",
+            "error_rate_pct",
+            "cpu_utilization_pct",
+            "memory_utilization_pct",
+            "queue_depth",
+            "disk_io_wait_ms",
+        ]
+    )
 
     # --- Cross-Domain Feature Flags ---
     enable_thermal_efficiency: bool = True
@@ -132,10 +134,9 @@ class FeatureConfig:
 # If we joined on "maintenance_status" for convenience, we'd be leaking
 # the target into the features.
 
+
 def align_temporal(
-    sys_chunk: pd.DataFrame,
-    app_chunk: pd.DataFrame,
-    config: FeatureConfig
+    sys_chunk: pd.DataFrame, app_chunk: pd.DataFrame, config: FeatureConfig
 ) -> pd.DataFrame:
     """
     Merge system metrics and application logs on (timestamp, machine_id).
@@ -161,15 +162,11 @@ def align_temporal(
     # Identify columns to bring from app_chunk (avoid duplicates)
     # Both DataFrames share: timestamp, machine_id, maintenance_status
     # We keep sys_chunk's maintenance_status as the authoritative one
-    app_cols_to_merge = [col for col in app_chunk.columns
-                         if col not in sys_chunk.columns or col in config.join_keys]
+    app_cols_to_merge = [
+        col for col in app_chunk.columns if col not in sys_chunk.columns or col in config.join_keys
+    ]
 
-    merged = pd.merge(
-        sys_chunk,
-        app_chunk[app_cols_to_merge],
-        on=config.join_keys,
-        how="left"
-    )
+    merged = pd.merge(sys_chunk, app_chunk[app_cols_to_merge], on=config.join_keys, how="left")
 
     # Forward-fill ONLY the software columns (within each machine)
     # WHY per-machine? Machine M1's last latency reading should NOT
@@ -178,15 +175,16 @@ def align_temporal(
     # WHY forward-fill, not interpolation?
     # Interpolation looks at BOTH neighbors (past AND future) — leakage.
     # Forward-fill only uses past information.
-    software_cols = [col for col in config.software_rolling_cols
-                     if col in merged.columns]
+    software_cols = [col for col in config.software_rolling_cols if col in merged.columns]
 
     if software_cols:
         merged = merged.sort_values(["machine_id", "timestamp"])
         merged[software_cols] = merged.groupby("machine_id")[software_cols].ffill()
 
-    logger.debug(f"Temporal alignment: {len(sys_chunk)} sys + {len(app_chunk)} app "
-                 f"→ {len(merged)} merged rows")
+    logger.debug(
+        f"Temporal alignment: {len(sys_chunk)} sys + {len(app_chunk)} app "
+        f"→ {len(merged)} merged rows"
+    )
 
     return merged
 
@@ -211,10 +209,8 @@ def align_temporal(
 # The first (window-1) rows will have NaN — this is CORRECT behavior.
 # We do NOT fill these NaNs with the column mean (that uses global info).
 
-def compute_rolling_features(
-    df: pd.DataFrame,
-    config: FeatureConfig
-) -> pd.DataFrame:
+
+def compute_rolling_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
     """
     Compute rolling mean and std for hardware and software columns.
 
@@ -257,7 +253,7 @@ def compute_rolling_features(
             # the system is degrading even if instantaneous values look okay.
             mean_col = f"{col}_mean_{window}"
             new_features[mean_col] = grouped.transform(
-                lambda x: x.rolling(window=window, min_periods=1, center=False).mean()
+                lambda x, w=window: x.rolling(window=w, min_periods=1, center=False).mean()
             )
 
             # Rolling STD: "How unstable is it recently?"
@@ -266,7 +262,7 @@ def compute_rolling_features(
             # std=5.0 means it's oscillating — impending failure.
             std_col = f"{col}_std_{window}"
             new_features[std_col] = grouped.transform(
-                lambda x: x.rolling(window=window, min_periods=2, center=False).std()
+                lambda x, w=window: x.rolling(window=w, min_periods=2, center=False).std()
             )
 
     # Assign all at once (faster than repeated df[col] = ...)
@@ -274,8 +270,10 @@ def compute_rolling_features(
     df = pd.concat([df, feature_df], axis=1)
 
     n_features = len(new_features)
-    logger.info(f"Rolling features: +{n_features} columns "
-                f"({len(available_cols)} cols × {len(config.rolling_windows)} windows × 2 stats)")
+    logger.info(
+        f"Rolling features: +{n_features} columns "
+        f"({len(available_cols)} cols × {len(config.rolling_windows)} windows × 2 stats)"
+    )
 
     return df
 
@@ -300,10 +298,8 @@ def compute_rolling_features(
 #
 # We NEVER use negative shifts. Period.
 
-def compute_lag_features(
-    df: pd.DataFrame,
-    config: FeatureConfig
-) -> pd.DataFrame:
+
+def compute_lag_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
     """
     Create lagged versions of key columns to capture temporal causality.
 
@@ -324,14 +320,14 @@ def compute_lag_features(
     # intentional. We lag columns with known causal chains:
     lag_candidates = [
         # Hardware: leading indicators of failure
-        "torque_Nm",              # Mechanical stress → downstream effects
-        "vibration_mm_s",         # Bearing wear signature
-        "air_temperature_K",      # Thermal stress propagation
-        "tool_wear_min",          # Cumulative degradation
+        "torque_Nm",  # Mechanical stress → downstream effects
+        "vibration_mm_s",  # Bearing wear signature
+        "air_temperature_K",  # Thermal stress propagation
+        "tool_wear_min",  # Cumulative degradation
         # Software: lagging indicators (response to hardware)
         "api_response_latency_ms",  # Software response to hardware stress
-        "error_rate_pct",           # Error cascade timing
-        "cpu_utilization_pct",      # Compute stress
+        "error_rate_pct",  # Error cascade timing
+        "cpu_utilization_pct",  # Compute stress
     ]
 
     available_lag_cols = [col for col in lag_candidates if col in df.columns]
@@ -355,8 +351,10 @@ def compute_lag_features(
     df = pd.concat([df, feature_df], axis=1)
 
     n_features = len(new_features)
-    logger.info(f"Lag features: +{n_features} columns "
-                f"({len(available_lag_cols)} cols × {len(config.lag_periods)} lags)")
+    logger.info(
+        f"Lag features: +{n_features} columns "
+        f"({len(available_lag_cols)} cols × {len(config.lag_periods)} lags)"
+    )
 
     return df
 
@@ -379,10 +377,8 @@ def compute_lag_features(
 #   curve indicate mechanical resistance (bearing failure, misalignment)
 # - Wear rate: First derivative of tool_wear. Acceleration = danger.
 
-def compute_cross_domain_features(
-    df: pd.DataFrame,
-    config: FeatureConfig
-) -> pd.DataFrame:
+
+def compute_cross_domain_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
     """
     Create interaction features that bridge hardware and software domains.
 
@@ -408,8 +404,8 @@ def compute_cross_domain_features(
         if "cpu_utilization_pct" in df.columns and "air_temperature_K" in df.columns:
             # Add epsilon to prevent division by zero (temp in Kelvin, so always > 0,
             # but quality-flagged rows might have NaN/0 from sensor errors)
-            df["thermal_efficiency_idx"] = (
-                df["cpu_utilization_pct"] / (df["air_temperature_K"] + 1e-6)
+            df["thermal_efficiency_idx"] = df["cpu_utilization_pct"] / (
+                df["air_temperature_K"] + 1e-6
             )
             features_added += 1
             logger.debug("Created: thermal_efficiency_idx")
@@ -457,9 +453,8 @@ def compute_cross_domain_features(
             )
             # Relative deviation from expected
             df["power_anomaly_score"] = (
-                (df["instantaneous_power_W"] - df["expected_power_W"]).abs()
-                / (df["expected_power_W"].abs() + 1e-6)
-            )
+                df["instantaneous_power_W"] - df["expected_power_W"]
+            ).abs() / (df["expected_power_W"].abs() + 1e-6)
             features_added += 3  # power, expected, anomaly_score
             logger.debug("Created: instantaneous_power_W, expected_power_W, power_anomaly_score")
 
@@ -513,11 +508,8 @@ CHUNK_SIZE = 5000  # Rows per processing chunk (matches Stage 1)
 
 
 def _process_chunk_with_buffer(
-    chunk: pd.DataFrame,
-    machine_buffers: dict,
-    config: FeatureConfig,
-    buffer_size: int
-) -> Tuple[pd.DataFrame, dict]:
+    chunk: pd.DataFrame, machine_buffers: dict, config: FeatureConfig, buffer_size: int
+) -> tuple[pd.DataFrame, dict]:
     """
     Process a single chunk with lookback buffer for continuity.
 
@@ -544,7 +536,7 @@ def _process_chunk_with_buffer(
     # the rolling computation at the chunk start has full context.
     # The buffer rows get features computed too, but we discard them.
     buffer_frames = []
-    for machine_id, buffer_df in machine_buffers.items():
+    for _, buffer_df in machine_buffers.items():
         if not buffer_df.empty:
             buffer_frames.append(buffer_df)
 
@@ -581,7 +573,7 @@ def _process_chunk_with_buffer(
     return result, updated_buffers
 
 
-def run_feature_pipeline(config: Optional[FeatureConfig] = None) -> Path:
+def run_feature_pipeline(config: FeatureConfig | None = None) -> Path:
     """
     Execute the full feature engineering pipeline with chunk boundary buffers.
 
@@ -638,8 +630,10 @@ def run_feature_pipeline(config: Optional[FeatureConfig] = None) -> Path:
     # Shorter windows (6, 12) are automatically satisfied if 36 is available.
     # Lag features need max(lag_periods) = 6, which is < 36, so also covered.
     buffer_size = max(config.rolling_windows)
-    logger.info(f"  Lookback buffer: {buffer_size} rows/machine "
-                f"({buffer_size * 5} min at 5-min intervals)")
+    logger.info(
+        f"  Lookback buffer: {buffer_size} rows/machine "
+        f"({buffer_size * 5} min at 5-min intervals)"
+    )
     logger.info(f"  Chunk size: {CHUNK_SIZE} rows")
 
     # --- Step 1: Read & Align (Full read for merge, then chunk) ---
@@ -710,9 +704,11 @@ def run_feature_pipeline(config: Optional[FeatureConfig] = None) -> Path:
 
         # Progress logging
         buffer_status = sum(len(b) for b in machine_buffers.values())
-        logger.info(f"  Chunk {chunk_idx + 1}/{n_chunks}: "
-                    f"{len(processed)} rows written, "
-                    f"buffer={buffer_status} rows across {len(machine_buffers)} machines")
+        logger.info(
+            f"  Chunk {chunk_idx + 1}/{n_chunks}: "
+            f"{len(processed)} rows written, "
+            f"buffer={buffer_status} rows across {len(machine_buffers)} machines"
+        )
 
     if writer:
         writer.close()
@@ -746,8 +742,10 @@ def run_feature_pipeline(config: Optional[FeatureConfig] = None) -> Path:
 
     # Feature variance check (confirm non-trivial features)
     variance_cols = [
-        "thermal_efficiency_idx", "power_anomaly_score",
-        "tool_wear_rate", "error_under_stress"
+        "thermal_efficiency_idx",
+        "power_anomaly_score",
+        "tool_wear_rate",
+        "error_under_stress",
     ]
     # Add a sample of rolling features
     sample_rolling = [c for c in full_output.columns if "_std_" in c][:3]

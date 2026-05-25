@@ -15,27 +15,24 @@ diagnoses.
 Reference: Paper 3 - Minimize 'Alert Fatigue' through concise, data-driven insights.
 """
 
+import asyncio
 import json
 import logging
 import os
-import asyncio
-import numpy as np
-import pandas as pd
-from pathlib import Path
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Tuple, Any
+import re
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import re
+from pathlib import Path
+from typing import Any
 
-import joblib
-import shap
 import aiohttp
+import joblib
+import numpy as np
+import pandas as pd
+import shap
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SentinelX.DiagnosticEngine")
 
 
@@ -45,8 +42,10 @@ logger = logging.getLogger("SentinelX.DiagnosticEngine")
 # This section encodes expert knowledge about failure patterns.
 # Reference: Input Context from Senior AI Solutions Architect
 
+
 class FailureMode(Enum):
     """Categorized failure modes based on domain expertise."""
+
     MECHANICAL_WEAR = "mechanical_wear"
     THERMAL_OVERLOAD = "thermal_overload"
     NETWORK_CONGESTION = "network_congestion"
@@ -57,33 +56,34 @@ class FailureMode(Enum):
 
 class RiskLevel(Enum):
     """Risk classification for downstream alerting systems."""
-    CRITICAL = "critical"      # Immediate action required
-    HIGH = "high"              # Action within 24 hours
-    MODERATE = "moderate"      # Schedule maintenance
-    LOW = "low"                # Monitor closely
-    NOMINAL = "nominal"        # Normal operation
+
+    CRITICAL = "critical"  # Immediate action required
+    HIGH = "high"  # Action within 24 hours
+    MODERATE = "moderate"  # Schedule maintenance
+    LOW = "low"  # Monitor closely
+    NOMINAL = "nominal"  # Normal operation
 
 
 # Domain knowledge: Feature groups and their physical meaning
 FEATURE_GROUPS = {
     "mechanical": [
-        "vibration_mm_s", "torque_Nm", "rotational_speed_rpm",
-        "tool_wear_min", "pressure_psi"
+        "vibration_mm_s",
+        "torque_Nm",
+        "rotational_speed_rpm",
+        "tool_wear_min",
+        "pressure_psi",
     ],
-    "thermal": [
-        "air_temperature_K", "process_temperature_K",
-        "thermal_efficiency_idx"
-    ],
-    "network": [
-        "network_latency_ms", "packet_loss_pct", "api_response_latency_ms"
-    ],
+    "thermal": ["air_temperature_K", "process_temperature_K", "thermal_efficiency_idx"],
+    "network": ["network_latency_ms", "packet_loss_pct", "api_response_latency_ms"],
     "software": [
-        "error_rate_pct", "cpu_utilization_pct", "memory_utilization_pct",
-        "disk_io_wait_ms", "queue_depth", "http_5xx_count"
+        "error_rate_pct",
+        "cpu_utilization_pct",
+        "memory_utilization_pct",
+        "disk_io_wait_ms",
+        "queue_depth",
+        "http_5xx_count",
     ],
-    "power": [
-        "power_anomaly_score", "fuzzy_pid_output"
-    ]
+    "power": ["power_anomaly_score", "fuzzy_pid_output"],
 }
 
 # Domain knowledge: Critical thresholds and interaction patterns
@@ -92,28 +92,28 @@ FAILURE_MECHANICS = {
         "description": "Torque × Tool Wear exceeds safe operating threshold",
         "features": ["torque_Nm", "tool_wear_min"],
         "threshold_product": 3000,  # Nm × minutes
-        "failure_mode": FailureMode.MECHANICAL_WEAR
+        "failure_mode": FailureMode.MECHANICAL_WEAR,
     },
     "thermal_throttle": {
         "description": "Air temperature rise + network latency spike = edge controller thermal throttle",
         "features": ["air_temperature_K", "network_latency_ms"],
         "temp_threshold": 310,  # Kelvin (~37°C)
         "latency_threshold": 50,  # ms
-        "failure_mode": FailureMode.THERMAL_OVERLOAD
+        "failure_mode": FailureMode.THERMAL_OVERLOAD,
     },
     "vibration_cascade": {
         "description": "High vibration causing disk I/O stress (physical-digital cascade)",
         "features": ["vibration_mm_s", "disk_io_wait_ms"],
         "vibration_threshold": 25,  # mm/s
-        "failure_mode": FailureMode.MECHANICAL_WEAR
+        "failure_mode": FailureMode.MECHANICAL_WEAR,
     },
     "error_storm": {
         "description": "Error rate spike under CPU stress indicates software instability",
         "features": ["error_rate_pct", "cpu_utilization_pct"],
         "error_threshold": 5,  # percent
         "cpu_threshold": 80,  # percent
-        "failure_mode": FailureMode.SOFTWARE_STRESS
-    }
+        "failure_mode": FailureMode.SOFTWARE_STRESS,
+    },
 }
 
 # Feature semantics for interpretation
@@ -123,7 +123,7 @@ FEATURE_SEMANTICS = {
     "_mean_": "sustained trend",
     "thermal_efficiency": "hybrid health score (lower = degradation)",
     "power_anomaly": "deviation from expected power consumption",
-    "error_under_stress": "errors occurring during high load"
+    "error_under_stress": "errors occurring during high load",
 }
 
 # =============================================================================
@@ -136,17 +136,17 @@ OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "60"))
 # Hybrid feature physical meanings for LLM context
 HYBRID_FEATURE_MEANINGS = {
     "torque_wear_product": "Torque × Tool Wear (Nm·min) - Mechanical stress accumulation. "
-                          "High values indicate the cutting tool is experiencing excessive "
-                          "stress under wear conditions, risking sudden breakage.",
+    "High values indicate the cutting tool is experiencing excessive "
+    "stress under wear conditions, risking sudden breakage.",
     "thermal_efficiency_idx": "CPU Utilization / Air Temperature (°C⁻¹) - Processing efficiency "
-                              "relative to cooling capacity. Low values suggest thermal throttling.",
+    "relative to cooling capacity. Low values suggest thermal throttling.",
     "power_anomaly_score": "|(Instantaneous Power - Expected Power)| / Expected Power - "
-                           "Deviation from normal power consumption pattern. High values "
-                           "indicate motor/drive electrical anomalies.",
+    "Deviation from normal power consumption pattern. High values "
+    "indicate motor/drive electrical anomalies.",
     "instantaneous_power_W": "RPM × Torque × (2π/60) - Real-time mechanical power output. "
-                             "Used to detect power delivery issues.",
+    "Used to detect power delivery issues.",
     "error_under_stress": "Error Rate × CPU Utilization / 100 - Software errors weighted by "
-                          "system load. High values indicate software instability under stress."
+    "system load. High values indicate software instability under stress.",
 }
 
 
@@ -232,9 +232,11 @@ Be SPECIFIC, not generic. Use actual sensor values in your recommendations."""
 # 3. DATA STRUCTURES
 # =============================================================================
 
+
 @dataclass
 class SHAPContribution:
     """Individual feature's contribution to prediction."""
+
     feature: str
     value: float
     shap_value: float
@@ -248,6 +250,7 @@ class SHAPContribution:
 @dataclass
 class DiagnosticResult:
     """Complete diagnostic output for a single prediction."""
+
     # Identification
     timestamp: str
     machine_id: str
@@ -262,18 +265,18 @@ class DiagnosticResult:
     confidence: str  # "high", "moderate", "low"
 
     # SHAP Analysis
-    top_contributors: List[Dict[str, Any]]
-    feature_group_impacts: Dict[str, float]
+    top_contributors: list[dict[str, Any]]
+    feature_group_impacts: dict[str, float]
 
     # Recommendations
-    immediate_actions: List[str]
-    monitoring_focus: List[str]
+    immediate_actions: list[str]
+    monitoring_focus: list[str]
 
     # Metadata
     model_version: str = "1.0"
     diagnostic_engine_version: str = "1.0"
 
-    def to_json(self) -> Dict[str, Any]:
+    def to_json(self) -> dict[str, Any]:
         """JSON format for database insertion (Stage 7)."""
         return {
             "timestamp": self.timestamp,
@@ -285,14 +288,17 @@ class DiagnosticResult:
             "confidence": self.confidence,
             "action": self.immediate_actions[0] if self.immediate_actions else "Monitor",
             "top_features": [c["feature"] for c in self.top_contributors[:3]],
-            "model_version": self.model_version
+            "model_version": self.model_version,
         }
 
     def to_markdown(self) -> str:
         """Human-readable Markdown report."""
         risk_emoji = {
-            "critical": "🔴", "high": "🟠",
-            "moderate": "🟡", "low": "🟢", "nominal": "⚪"
+            "critical": "🔴",
+            "high": "🟠",
+            "moderate": "🟡",
+            "low": "🟢",
+            "nominal": "⚪",
         }
 
         md = f"""
@@ -319,24 +325,25 @@ class DiagnosticResult:
             direction = "↑ Risk" if c["direction"] == "increases_risk" else "↓ Risk"
             md += f"| {c['feature']} | {c['value']:.3f} | {direction} ({c['shap_value']:+.3f}) |\n"
 
-        md += f"""
+        md += """
 ### Feature Group Analysis
 """
-        for group, impact in sorted(self.feature_group_impacts.items(),
-                                     key=lambda x: abs(x[1]), reverse=True):
+        for group, impact in sorted(
+            self.feature_group_impacts.items(), key=lambda x: abs(x[1]), reverse=True
+        ):
             if abs(impact) > 0.01:
                 bar = "█" * int(min(abs(impact) * 20, 10))
                 sign = "+" if impact > 0 else "-"
                 md += f"- **{group.title()}**: {sign}{abs(impact):.3f} {bar}\n"
 
-        md += f"""
+        md += """
 ### Recommended Actions
 """
         for i, action in enumerate(self.immediate_actions, 1):
             md += f"{i}. {action}\n"
 
         if self.monitoring_focus:
-            md += f"""
+            md += """
 ### Monitoring Focus
 """
             for item in self.monitoring_focus:
@@ -353,6 +360,7 @@ class DiagnosticResult:
 # 4. DIAGNOSTIC ENGINE
 # =============================================================================
 
+
 class DiagnosticEngine:
     """
     The core diagnostic engine that transforms ML predictions into actionable insights.
@@ -367,7 +375,7 @@ class DiagnosticEngine:
         self,
         model_path: str = "models/model.joblib",
         feature_names_path: str = "models/feature_names.json",
-        threshold_config_path: str = "models/evaluation_results.json"
+        threshold_config_path: str = "models/evaluation_results.json",
     ):
         """
         Initialize the diagnostic engine with trained model artifacts.
@@ -438,10 +446,7 @@ class DiagnosticEngine:
         else:
             return RiskLevel.NOMINAL
 
-    def _compute_shap_contributions(
-        self,
-        features: pd.DataFrame
-    ) -> List[SHAPContribution]:
+    def _compute_shap_contributions(self, features: pd.DataFrame) -> list[SHAPContribution]:
         """
         Compute SHAP values and create sorted contribution list.
 
@@ -465,13 +470,13 @@ class DiagnosticEngine:
         contributions = []
         feature_values = features.iloc[0]
 
-        for i, (feat, shap_val) in enumerate(zip(self.feature_names, shap_vals)):
+        for _i, (feat, shap_val) in enumerate(zip(self.feature_names, shap_vals)):
             if feat in feature_values.index:
                 contrib = SHAPContribution(
                     feature=feat,
                     value=float(feature_values[feat]),
                     shap_value=float(shap_val),
-                    direction="increases_risk" if shap_val > 0 else "decreases_risk"
+                    direction="increases_risk" if shap_val > 0 else "decreases_risk",
                 )
                 contributions.append(contrib)
 
@@ -481,16 +486,15 @@ class DiagnosticEngine:
         return contributions
 
     def _compute_feature_group_impacts(
-        self,
-        contributions: List[SHAPContribution]
-    ) -> Dict[str, float]:
+        self, contributions: list[SHAPContribution]
+    ) -> dict[str, float]:
         """
         Aggregate SHAP values by feature group.
 
         This helps identify which DOMAIN (mechanical, thermal, etc.)
         is most responsible for the prediction.
         """
-        group_impacts = {group: 0.0 for group in FEATURE_GROUPS}
+        group_impacts = dict.fromkeys(FEATURE_GROUPS, 0.0)
 
         for contrib in contributions:
             for group, features in FEATURE_GROUPS.items():
@@ -503,10 +507,8 @@ class DiagnosticEngine:
         return group_impacts
 
     def _analyze_failure_mechanics(
-        self,
-        features: pd.DataFrame,
-        contributions: List[SHAPContribution]
-    ) -> Tuple[FailureMode, str, str]:
+        self, features: pd.DataFrame, contributions: list[SHAPContribution]
+    ) -> tuple[FailureMode, str, str]:
         """
         CHAIN OF THOUGHT - Step 1: ANALYZE
 
@@ -544,7 +546,6 @@ class DiagnosticEngine:
         # 3. Vibration cascade
         if "vibration_mm_s" in feature_values and "disk_io_wait_ms" in feature_values:
             vib = feature_values["vibration_mm_s"]
-            disk_io = feature_values["disk_io_wait_ms"]
             vib_thresh = FAILURE_MECHANICS["vibration_cascade"]["vibration_threshold"]
 
             if vib > vib_thresh * 0.8:
@@ -593,7 +594,7 @@ class DiagnosticEngine:
                 FailureMode.COMPLEX_PATTERN,
                 "Model detects a complex pattern not reducible to single sensors. "
                 "Multiple interacting factors are contributing to elevated risk.",
-                "low"
+                "low",
             )
 
         # Determine failure mode from top contributing feature group
@@ -605,11 +606,13 @@ class DiagnosticEngine:
             "thermal": FailureMode.THERMAL_OVERLOAD,
             "network": FailureMode.NETWORK_CONGESTION,
             "software": FailureMode.SOFTWARE_STRESS,
-            "power": FailureMode.POWER_ANOMALY
+            "power": FailureMode.POWER_ANOMALY,
         }
 
         failure_mode = group_to_mode.get(top_group, FailureMode.COMPLEX_PATTERN)
-        explanation = f"Elevated {top_group} indicators detected. Primary driver: {contributions[0].feature}"
+        explanation = (
+            f"Elevated {top_group} indicators detected. Primary driver: {contributions[0].feature}"
+        )
 
         return failure_mode, explanation, "moderate"
 
@@ -617,9 +620,9 @@ class DiagnosticEngine:
         self,
         failure_mode: FailureMode,
         risk_level: RiskLevel,
-        contributions: List[SHAPContribution],
-        features: pd.DataFrame
-    ) -> Tuple[List[str], List[str]]:
+        contributions: list[SHAPContribution],
+        features: pd.DataFrame,
+    ) -> tuple[list[str], list[str]]:
         """
         CHAIN OF THOUGHT - Step 3: RECOMMEND
 
@@ -713,9 +716,9 @@ class DiagnosticEngine:
     def _build_llm_prompt(
         self,
         features: pd.DataFrame,
-        contributions: List[SHAPContribution],
+        contributions: list[SHAPContribution],
         probability: float,
-        risk_level: RiskLevel
+        risk_level: RiskLevel,
     ) -> str:
         """
         Build context-rich prompt for the LLM with SHAP analysis.
@@ -785,7 +788,7 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
 
         return prompt
 
-    async def _call_ollama(self, prompt: str) -> Optional[str]:
+    async def _call_ollama(self, prompt: str) -> str | None:
         """
         Make async call to Ollama API.
 
@@ -801,7 +804,7 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
             "options": {
                 "temperature": 0.3,  # Lower for more consistent outputs
                 "num_predict": 1500,  # Enough for JSON + report
-            }
+            },
         }
 
         try:
@@ -828,10 +831,8 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
             return None
 
     def _parse_llm_response(
-        self,
-        response: str,
-        fallback_result: DiagnosticResult
-    ) -> Tuple[Dict[str, Any], str]:
+        self, response: str, fallback_result: DiagnosticResult
+    ) -> tuple[dict[str, Any], str]:
         """
         Parse LLM response into structured JSON and Markdown parts.
 
@@ -846,7 +847,7 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
         markdown_report = ""
 
         # Extract JSON block using regex
-        json_pattern = r'```json\s*([\s\S]*?)\s*```'
+        json_pattern = r"```json\s*([\s\S]*?)\s*```"
         json_match = re.search(json_pattern, response)
 
         if json_match:
@@ -860,12 +861,12 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
         # Extract Markdown (everything after the JSON block, or if no JSON, look for markdown headers)
         if json_match:
             # Get content after JSON block
-            after_json = response[json_match.end():].strip()
+            after_json = response[json_match.end() :].strip()
             if after_json:
                 markdown_report = after_json
         else:
             # No JSON found, check if there's markdown content
-            md_pattern = r'(#{1,3}\s+.*[\s\S]*)'
+            md_pattern = r"(#{1,3}\s+.*[\s\S]*)"
             md_match = re.search(md_pattern, response)
             if md_match:
                 markdown_report = md_match.group(1)
@@ -877,8 +878,12 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
         # Ensure required fields exist with valid values
         valid_risk_levels = {"critical", "high", "moderate", "low", "nominal"}
         valid_root_causes = {
-            "mechanical_wear", "thermal_overload", "network_congestion",
-            "software_stress", "power_anomaly", "complex_pattern"
+            "mechanical_wear",
+            "thermal_overload",
+            "network_congestion",
+            "software_stress",
+            "power_anomaly",
+            "complex_pattern",
         }
         valid_confidence = {"high", "moderate", "low"}
 
@@ -910,14 +915,15 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
         return json_data, markdown_report
 
     def _generate_minimal_report(
-        self,
-        json_data: Dict[str, Any],
-        fallback_result: DiagnosticResult
+        self, json_data: dict[str, Any], fallback_result: DiagnosticResult
     ) -> str:
         """Generate minimal markdown report if LLM didn't provide one."""
         risk_emoji = {
-            "critical": "🔴", "high": "🟠",
-            "moderate": "🟡", "low": "🟢", "nominal": "⚪"
+            "critical": "🔴",
+            "high": "🟠",
+            "moderate": "🟡",
+            "low": "🟢",
+            "nominal": "⚪",
         }
         risk_level = json_data.get("risk_level", "nominal")
         emoji = risk_emoji.get(risk_level, "⚪")
@@ -938,10 +944,7 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
 """
 
     async def diagnose_with_llm(
-        self,
-        features: pd.DataFrame,
-        machine_id: str = "Unknown",
-        timestamp: Optional[str] = None
+        self, features: pd.DataFrame, machine_id: str = "Unknown", timestamp: str | None = None
     ) -> DiagnosticResult:
         """
         LLM-powered diagnosis with automatic fallback to rule-based logic.
@@ -985,8 +988,10 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
         contributions = self._compute_shap_contributions(model_features)
         group_impacts = self._compute_feature_group_impacts(contributions)
 
-        logger.info(f"[LLM] Top contributor: {contributions[0].feature} "
-                    f"(SHAP: {contributions[0].shap_value:+.3f})")
+        logger.info(
+            f"[LLM] Top contributor: {contributions[0].feature} "
+            f"(SHAP: {contributions[0].shap_value:+.3f})"
+        )
 
         # Step 3: Generate rule-based result as fallback
         failure_mode, explanation, confidence = self._analyze_failure_mechanics(
@@ -1009,31 +1014,27 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
                     "feature": c.feature,
                     "value": c.value,
                     "shap_value": c.shap_value,
-                    "direction": c.direction
+                    "direction": c.direction,
                 }
                 for c in contributions[:10]
             ],
             feature_group_impacts=group_impacts,
             immediate_actions=actions,
             monitoring_focus=monitoring,
-            diagnostic_engine_version="1.0-rule-based"
+            diagnostic_engine_version="1.0-rule-based",
         )
 
         # Step 4: Call LLM
         logger.info(f"[LLM] Calling Ollama ({OLLAMA_MODEL})...")
 
-        prompt = self._build_llm_prompt(
-            model_features, contributions, probability, risk_level
-        )
+        prompt = self._build_llm_prompt(model_features, contributions, probability, risk_level)
 
         llm_response = await self._call_ollama(prompt)
 
         # Step 5: Parse LLM response or fallback
         if llm_response:
             logger.info("[LLM] Received response, parsing...")
-            json_data, markdown_report = self._parse_llm_response(
-                llm_response, fallback_result
-            )
+            json_data, markdown_report = self._parse_llm_response(llm_response, fallback_result)
 
             # Build LLM-enhanced result
             result = DiagnosticResult(
@@ -1049,18 +1050,20 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
                         "feature": c.feature,
                         "value": c.value,
                         "shap_value": c.shap_value,
-                        "direction": c.direction
+                        "direction": c.direction,
                     }
                     for c in contributions[:10]
                 ],
                 feature_group_impacts=group_impacts,
                 immediate_actions=[json_data["recommended_action"]] + actions[1:],
                 monitoring_focus=monitoring,
-                diagnostic_engine_version=f"2.0-llm-{OLLAMA_MODEL}"
+                diagnostic_engine_version=f"2.0-llm-{OLLAMA_MODEL}",
             )
 
-            logger.info(f"[LLM] Diagnosis complete: {json_data['root_cause']} "
-                        f"(confidence: {json_data['confidence']})")
+            logger.info(
+                f"[LLM] Diagnosis complete: {json_data['root_cause']} "
+                f"(confidence: {json_data['confidence']})"
+            )
 
             return result
 
@@ -1070,10 +1073,7 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
             return fallback_result
 
     def diagnose(
-        self,
-        features: pd.DataFrame,
-        machine_id: str = "Unknown",
-        timestamp: Optional[str] = None
+        self, features: pd.DataFrame, machine_id: str = "Unknown", timestamp: str | None = None
     ) -> DiagnosticResult:
         """
         Main diagnostic entry point.
@@ -1116,8 +1116,10 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
         contributions = self._compute_shap_contributions(model_features)
         group_impacts = self._compute_feature_group_impacts(contributions)
 
-        logger.info(f"Top contributor: {contributions[0].feature} "
-                    f"(SHAP: {contributions[0].shap_value:+.3f})")
+        logger.info(
+            f"Top contributor: {contributions[0].feature} "
+            f"(SHAP: {contributions[0].shap_value:+.3f})"
+        )
 
         # Step 3: DIAGNOSE - Apply domain knowledge
         failure_mode, explanation, confidence = self._analyze_failure_mechanics(
@@ -1145,13 +1147,13 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
                     "feature": c.feature,
                     "value": c.value,
                     "shap_value": c.shap_value,
-                    "direction": c.direction
+                    "direction": c.direction,
                 }
                 for c in contributions[:10]
             ],
             feature_group_impacts=group_impacts,
             immediate_actions=actions,
-            monitoring_focus=monitoring
+            monitoring_focus=monitoring,
         )
 
         return result
@@ -1160,8 +1162,8 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
         self,
         features_df: pd.DataFrame,
         machine_id_col: str = "machine_id",
-        timestamp_col: str = "timestamp"
-    ) -> List[DiagnosticResult]:
+        timestamp_col: str = "timestamp",
+    ) -> list[DiagnosticResult]:
         """
         Diagnose multiple observations.
 
@@ -1181,8 +1183,7 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
 
             # Create single-row DataFrame
             feature_row = pd.DataFrame([row]).drop(
-                columns=[machine_id_col, timestamp_col],
-                errors='ignore'
+                columns=[machine_id_col, timestamp_col], errors="ignore"
             )
 
             result = self.diagnose(feature_row, machine_id, timestamp)
@@ -1191,10 +1192,7 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
         return results
 
     def diagnose_sync_llm(
-        self,
-        features: pd.DataFrame,
-        machine_id: str = "Unknown",
-        timestamp: Optional[str] = None
+        self, features: pd.DataFrame, machine_id: str = "Unknown", timestamp: str | None = None
     ) -> DiagnosticResult:
         """
         Synchronous wrapper for LLM-powered diagnosis.
@@ -1211,22 +1209,22 @@ Based on this SHAP explainability analysis, provide your diagnosis following the
             DiagnosticResult with LLM-generated or rule-based analysis
         """
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # Already in async context - can't use run_until_complete
             # Fall back to rule-based
-            logger.warning("Called diagnose_sync_llm from async context, "
-                           "use diagnose_with_llm directly")
+            logger.warning(
+                "Called diagnose_sync_llm from async context, " "use diagnose_with_llm directly"
+            )
             return self.diagnose(features, machine_id, timestamp)
         except RuntimeError:
             # No event loop running - create one
-            return asyncio.run(
-                self.diagnose_with_llm(features, machine_id, timestamp)
-            )
+            return asyncio.run(self.diagnose_with_llm(features, machine_id, timestamp))
 
 
 # =============================================================================
 # 5. CLI & DEMO
 # =============================================================================
+
 
 def run_demo():
     """
@@ -1256,15 +1254,21 @@ def run_demo():
     logger.info(f"\nDiagnosing {len(samples)} samples...")
     logger.info("=" * 60)
 
-    for idx, row in samples.iterrows():
+    for _, row in samples.iterrows():
         machine_id = row.get("machine_id", "Unknown")
         timestamp = str(row.get("timestamp", ""))
         actual = "FAILURE" if row.get("machine_failure", 0) == 1 else "HEALTHY"
 
         # Prepare features
-        exclude_cols = ["timestamp", "machine_id", "machine_failure",
-                        "product_type", "maintenance_status",
-                        "maintenance_status_x", "maintenance_status_y"]
+        exclude_cols = [
+            "timestamp",
+            "machine_id",
+            "machine_failure",
+            "product_type",
+            "maintenance_status",
+            "maintenance_status_x",
+            "maintenance_status_y",
+        ]
         feature_cols = [c for c in row.index if c not in exclude_cols]
         features = pd.DataFrame([row[feature_cols]])
         features = features.select_dtypes(include=[np.number])
@@ -1317,9 +1321,15 @@ def diagnose_from_file(input_path: str, output_dir: str = "diagnostics"):
         timestamp = str(row.get("timestamp", datetime.now().isoformat()))
 
         # Prepare features
-        exclude_cols = ["timestamp", "machine_id", "machine_failure",
-                        "product_type", "maintenance_status",
-                        "maintenance_status_x", "maintenance_status_y"]
+        exclude_cols = [
+            "timestamp",
+            "machine_id",
+            "machine_failure",
+            "product_type",
+            "maintenance_status",
+            "maintenance_status_x",
+            "maintenance_status_y",
+        ]
         feature_cols = [c for c in row.index if c not in exclude_cols]
         features = pd.DataFrame([row[feature_cols]])
         features = features.select_dtypes(include=[np.number])
@@ -1331,13 +1341,13 @@ def diagnose_from_file(input_path: str, output_dir: str = "diagnostics"):
         if result.risk_level != "nominal":
             # Save markdown report
             md_path = output_path / f"{machine_id}_{idx}_report.md"
-            with open(md_path, 'w') as f:
+            with open(md_path, "w") as f:
                 f.write(result.to_markdown())
 
     # Save all JSON summaries
     json_summaries = [r.to_json() for r in results]
     json_path = output_path / "diagnostic_summaries.json"
-    with open(json_path, 'w') as f:
+    with open(json_path, "w") as f:
         json.dump(json_summaries, f, indent=2)
 
     # Summary statistics
@@ -1345,7 +1355,7 @@ def diagnose_from_file(input_path: str, output_dir: str = "diagnostics"):
     for r in results:
         risk_counts[r.risk_level] = risk_counts.get(r.risk_level, 0) + 1
 
-    logger.info(f"\nDiagnostic Summary:")
+    logger.info("\nDiagnostic Summary:")
     logger.info(f"  Total observations: {len(results)}")
     for level, count in sorted(risk_counts.items()):
         logger.info(f"  {level.upper()}: {count}")
@@ -1384,15 +1394,21 @@ async def run_llm_demo():
     logger.info(f"\nDiagnosing {len(samples)} samples with LLM...")
     logger.info("=" * 60)
 
-    for idx, row in samples.iterrows():
+    for _, row in samples.iterrows():
         machine_id = row.get("machine_id", "Unknown")
         timestamp = str(row.get("timestamp", ""))
         actual = "FAILURE" if row.get("machine_failure", 0) == 1 else "HEALTHY"
 
         # Prepare features
-        exclude_cols = ["timestamp", "machine_id", "machine_failure",
-                        "product_type", "maintenance_status",
-                        "maintenance_status_x", "maintenance_status_y"]
+        exclude_cols = [
+            "timestamp",
+            "machine_id",
+            "machine_failure",
+            "product_type",
+            "maintenance_status",
+            "maintenance_status_x",
+            "maintenance_status_y",
+        ]
         feature_cols = [c for c in row.index if c not in exclude_cols]
         features = pd.DataFrame([row[feature_cols]])
         features = features.select_dtypes(include=[np.number])

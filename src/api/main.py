@@ -29,37 +29,43 @@ AWS Deployment Strategy:
 Reference: Paper 3 - Every prediction is persisted for Alert Fatigue analysis.
 """
 
-import os
-import json
 import logging
-from datetime import datetime
-from typing import Dict, Any, List, Optional
-from contextlib import asynccontextmanager
+import os
 from collections import deque
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Depends, Query
-from fastapi.responses import JSONResponse, PlainTextResponse
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from dotenv import load_dotenv
 
 # Load environment variables first
 load_dotenv()
 
+from agent import DiagnosticEngine, DiagnosticResult  # noqa: E402
+
 # Local imports
-from database import (
-    init_db, get_db, create_alert, get_alerts,
-    get_alert_fatigue_summary, acknowledge_alert, check_db_health, Alert
+from database import (  # noqa: E402
+    Alert,
+    acknowledge_alert,
+    check_db_health,
+    create_alert,
+    get_alert_fatigue_summary,
+    get_alerts,
+    get_db,
+    init_db,
 )
-from agent import DiagnosticEngine, DiagnosticResult
-from feature_engineer import FeatureConfig
+from feature_engineer import FeatureConfig  # noqa: E402
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
-    format='%(asctime)s [%(levelname)s] %(name)s - %(message)s'
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
 logger = logging.getLogger("SentinelX.API")
 
@@ -75,6 +81,7 @@ logger = logging.getLogger("SentinelX.API")
 #
 # SOLUTION: Store the last N observations per machine and compute REAL rolling
 # statistics at inference time, exactly as done during training.
+
 
 class FeatureStore:
     """
@@ -101,7 +108,7 @@ class FeatureStore:
         "cpu_utilization_pct": (30, 80),
         "memory_utilization_pct": (40, 85),
         "queue_depth": (0, 50),
-        "disk_io_wait_ms": (5, 20)
+        "disk_io_wait_ms": (5, 20),
     }
 
     def __init__(self, buffer_size: int = 36, min_history: int = 6):
@@ -116,10 +123,10 @@ class FeatureStore:
         """
         self.buffer_size = buffer_size
         self.min_history = min_history
-        self.buffers: Dict[str, deque] = {}
+        self.buffers: dict[str, deque] = {}
         self.config = FeatureConfig()
 
-    def update(self, machine_id: str, observation: Dict[str, Any]) -> None:
+    def update(self, machine_id: str, observation: dict[str, Any]) -> None:
         """
         Add an observation to the machine's history buffer.
 
@@ -187,7 +194,7 @@ class FeatureStore:
 
             return base_std + extra_std
 
-    def compute_rolling_features(self, df: pd.DataFrame) -> Dict[str, float]:
+    def compute_rolling_features(self, df: pd.DataFrame) -> dict[str, float]:
         """
         Compute rolling mean and std features.
 
@@ -199,10 +206,7 @@ class FeatureStore:
         still providing proper rolling stats when history accumulates.
         """
         features = {}
-        rolling_cols = (
-            self.config.hardware_rolling_cols +
-            self.config.software_rolling_cols
-        )
+        rolling_cols = self.config.hardware_rolling_cols + self.config.software_rolling_cols
         n_observations = len(df)
         use_synthetic = n_observations < self.min_history
 
@@ -214,7 +218,9 @@ class FeatureStore:
 
             for window in self.config.rolling_windows:  # [6, 12, 36]
                 # Rolling mean (always use real rolling)
-                mean_val = series.rolling(window=window, min_periods=1, center=False).mean().iloc[-1]
+                mean_val = (
+                    series.rolling(window=window, min_periods=1, center=False).mean().iloc[-1]
+                )
                 features[f"{col}_mean_{window}"] = mean_val
 
                 # Rolling std (hybrid approach)
@@ -225,12 +231,14 @@ class FeatureStore:
                     features[f"{col}_std_{window}"] = synthetic_std * (1 + window / 36)
                 else:
                     # Enough history: use real rolling std
-                    std_val = series.rolling(window=window, min_periods=2, center=False).std().iloc[-1]
+                    std_val = (
+                        series.rolling(window=window, min_periods=2, center=False).std().iloc[-1]
+                    )
                     features[f"{col}_std_{window}"] = std_val if pd.notna(std_val) else 0.0
 
         return features
 
-    def compute_lag_features(self, df: pd.DataFrame) -> Dict[str, float]:
+    def compute_lag_features(self, df: pd.DataFrame) -> dict[str, float]:
         """
         Compute lag features.
 
@@ -240,8 +248,13 @@ class FeatureStore:
         """
         features = {}
         lag_cols = [
-            "torque_Nm", "vibration_mm_s", "air_temperature_K", "tool_wear_min",
-            "api_response_latency_ms", "error_rate_pct", "cpu_utilization_pct"
+            "torque_Nm",
+            "vibration_mm_s",
+            "air_temperature_K",
+            "tool_wear_min",
+            "api_response_latency_ms",
+            "error_rate_pct",
+            "cpu_utilization_pct",
         ]
         n_observations = len(df)
 
@@ -257,7 +270,9 @@ class FeatureStore:
                     features[f"{col}_lag_{lag}"] = series.iloc[-(lag + 1)]
                 else:
                     # Cold-start: synthesize trend based on value extremity
-                    normal_range = self.NORMAL_RANGES.get(col, (current_value * 0.8, current_value * 1.2))
+                    normal_range = self.NORMAL_RANGES.get(
+                        col, (current_value * 0.8, current_value * 1.2)
+                    )
                     low, high = normal_range
 
                     if current_value > high:
@@ -270,7 +285,7 @@ class FeatureStore:
                         # Normal: stable history
                         trend_factor = 1.0
 
-                    features[f"{col}_lag_{lag}"] = current_value * (trend_factor ** lag)
+                    features[f"{col}_lag_{lag}"] = current_value * (trend_factor**lag)
 
         return features
 
@@ -321,7 +336,7 @@ class FeatureStore:
 
 
 # Global feature store instance (persists across requests)
-feature_store: Optional[FeatureStore] = None
+feature_store: FeatureStore | None = None
 
 
 # =============================================================================
@@ -332,9 +347,11 @@ feature_store: Optional[FeatureStore] = None
 # - Auto-documentation: generates OpenAPI schema
 # - Type hints: IDE autocomplete + runtime checking
 
+
 class SystemMetrics(BaseModel):
     """Raw system metrics from edge sensors."""
-    timestamp: Optional[str] = Field(None, description="ISO format timestamp")
+
+    timestamp: str | None = Field(None, description="ISO format timestamp")
     machine_id: str = Field(..., description="Machine identifier")
 
     # Hardware sensors
@@ -343,13 +360,13 @@ class SystemMetrics(BaseModel):
     rotational_speed_rpm: float = Field(..., ge=0, le=5000, description="RPM")
     torque_Nm: float = Field(..., ge=0, le=200, description="Torque in Newton-meters")
     tool_wear_min: float = Field(..., ge=0, description="Tool wear in minutes")
-    vibration_mm_s: Optional[float] = Field(15.0, ge=0, description="Vibration mm/s")
-    pressure_psi: Optional[float] = Field(100.0, ge=0, description="Pressure PSI")
+    vibration_mm_s: float | None = Field(15.0, ge=0, description="Vibration mm/s")
+    pressure_psi: float | None = Field(100.0, ge=0, description="Pressure PSI")
 
     # Edge computing
-    network_latency_ms: Optional[float] = Field(20.0, ge=0, description="Network latency")
-    edge_processing_time_ms: Optional[float] = Field(15.0, ge=0, description="Edge processing")
-    fuzzy_pid_output: Optional[float] = Field(0.5, ge=0, le=1, description="PID output")
+    network_latency_ms: float | None = Field(20.0, ge=0, description="Network latency")
+    edge_processing_time_ms: float | None = Field(15.0, ge=0, description="Edge processing")
+    fuzzy_pid_output: float | None = Field(0.5, ge=0, le=1, description="PID output")
 
     class Config:
         json_schema_extra = {
@@ -364,13 +381,14 @@ class SystemMetrics(BaseModel):
                 "pressure_psi": 115.0,
                 "network_latency_ms": 25.0,
                 "edge_processing_time_ms": 12.0,
-                "fuzzy_pid_output": 0.65
+                "fuzzy_pid_output": 0.65,
             }
         }
 
 
 class ApplicationLogs(BaseModel):
     """Application-level metrics."""
+
     error_rate_pct: float = Field(5.0, ge=0, le=100, description="Error rate %")
     cpu_utilization_pct: float = Field(50.0, ge=0, le=100, description="CPU %")
     memory_utilization_pct: float = Field(60.0, ge=0, le=100, description="Memory %")
@@ -384,48 +402,53 @@ class ApplicationLogs(BaseModel):
 
 class PredictRequest(BaseModel):
     """Complete prediction request with system + app metrics."""
+
     system: SystemMetrics
     application: ApplicationLogs
 
 
 class PredictResponse(BaseModel):
     """Prediction response with full diagnostic."""
+
     alert_id: int
     machine_id: str
     timestamp: str
     risk_level: str
     failure_probability: float
-    root_cause: Optional[str]
+    root_cause: str | None
     confidence: str
     markdown_report: str
-    json_summary: Dict[str, Any]
+    json_summary: dict[str, Any]
 
 
 class AlertResponse(BaseModel):
     """Alert record response."""
+
     id: int
     machine_id: str
     timestamp: str
     failure_prob: float
     risk_level: str
-    root_cause: Optional[str]
+    root_cause: str | None
     acknowledged: bool
     created_at: str
 
 
 class HealthResponse(BaseModel):
     """Health check response."""
+
     status: str
     version: str
-    database: Dict[str, Any]
+    database: dict[str, Any]
     model_loaded: bool
 
 
 class AcknowledgeRequest(BaseModel):
     """Request to acknowledge an alert."""
+
     acknowledged_by: str
-    action_taken: Optional[str] = None
-    is_false_positive: Optional[bool] = None
+    action_taken: str | None = None
+    is_false_positive: bool | None = None
 
 
 # =============================================================================
@@ -436,7 +459,7 @@ class AcknowledgeRequest(BaseModel):
 # - Ensures model is loaded before serving traffic
 # - Clean shutdown on SIGTERM (ECS/Kubernetes)
 
-diagnostic_engine: Optional[DiagnosticEngine] = None
+diagnostic_engine: DiagnosticEngine | None = None
 
 
 @asynccontextmanager
@@ -465,7 +488,7 @@ async def lifespan(app: FastAPI):
         diagnostic_engine = DiagnosticEngine(
             model_path=os.getenv("MODEL_PATH", "models/model.joblib"),
             feature_names_path=os.getenv("FEATURE_NAMES_PATH", "models/feature_names.json"),
-            threshold_config_path=os.getenv("THRESHOLDS_PATH", "models/evaluation_results.json")
+            threshold_config_path=os.getenv("THRESHOLDS_PATH", "models/evaluation_results.json"),
         )
         logger.info("Diagnostic engine loaded successfully")
     except Exception as e:
@@ -510,7 +533,7 @@ Raw Metrics → Feature Engineering → XGBoost → SHAP → Diagnostic Report �
 - Paper 4: Real-time quality gates
     """,
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS middleware for web clients
@@ -528,6 +551,7 @@ app.add_middleware(
 # =============================================================================
 # This replaces the old synthetic feature approximation with REAL rolling
 # statistics computed from historical observations, fixing the train-serve mismatch.
+
 
 def engineer_features(system: SystemMetrics, application: ApplicationLogs) -> pd.DataFrame:
     """
@@ -562,7 +586,6 @@ def engineer_features(system: SystemMetrics, application: ApplicationLogs) -> pd
         "network_latency_ms": system.network_latency_ms or 20.0,
         "edge_processing_time_ms": system.edge_processing_time_ms or 15.0,
         "fuzzy_pid_output": system.fuzzy_pid_output or 0.5,
-
         # Application metrics
         "api_response_latency_ms": application.api_response_latency_ms,
         "error_rate_pct": application.error_rate_pct,
@@ -598,8 +621,8 @@ def engineer_features(system: SystemMetrics, application: ApplicationLogs) -> pd
     # --- Step 7: Compute cross-domain features (matching training exactly) ---
 
     # thermal_efficiency_idx (feature_engineer.py lines 411-413)
-    features["thermal_efficiency_idx"] = (
-        features["cpu_utilization_pct"] / (features["air_temperature_K"] + 1e-6)
+    features["thermal_efficiency_idx"] = features["cpu_utilization_pct"] / (
+        features["air_temperature_K"] + 1e-6
     )
 
     # instantaneous_power_W (feature_engineer.py lines 451-453)
@@ -630,6 +653,7 @@ def engineer_features(system: SystemMetrics, application: ApplicationLogs) -> pd
 # =============================================================================
 # 5. API ENDPOINTS
 # =============================================================================
+
 
 @app.get("/", response_class=PlainTextResponse)
 async def root():
@@ -674,15 +698,12 @@ async def health_check():
         status="healthy" if db_health["status"] == "healthy" else "degraded",
         version="1.0.0",
         database=db_health,
-        model_loaded=diagnostic_engine is not None
+        model_loaded=diagnostic_engine is not None,
     )
 
 
 @app.post("/predict", response_model=PredictResponse)
-async def predict(
-    request: PredictRequest,
-    db: Session = Depends(get_db)
-):
+async def predict(request: PredictRequest, db: Session = Depends(get_db)):
     """
     Generate failure prediction with full diagnostic report.
 
@@ -719,23 +740,21 @@ async def predict(
     # Uses LLM-powered diagnosis with automatic fallback to rule-based
     try:
         result: DiagnosticResult = await diagnostic_engine.diagnose_with_llm(
-            features=features,
-            machine_id=request.system.machine_id,
-            timestamp=timestamp
+            features=features, machine_id=request.system.machine_id, timestamp=timestamp
         )
     except Exception as e:
         logger.error(f"Diagnostic failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Diagnostic engine error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Diagnostic engine error: {str(e)}") from e
 
     # Step 3: Persist to database
     raw_data = {
         "system": request.system.model_dump(),
-        "application": request.application.model_dump()
+        "application": request.application.model_dump(),
     }
 
     shap_data = {
         "top_contributors": result.top_contributors[:10],
-        "feature_group_impacts": result.feature_group_impacts
+        "feature_group_impacts": result.feature_group_impacts,
     }
 
     try:
@@ -751,12 +770,12 @@ async def predict(
             raw_data=raw_data,
             shap_values=shap_data,
             threshold_used="balanced",
-            model_version=result.model_version
+            model_version=result.model_version,
         )
         logger.info(f"Alert created: id={alert.id}, risk={result.risk_level}")
     except Exception as e:
         logger.error(f"Database error: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") from e
 
     # Step 4: Return response
     return PredictResponse(
@@ -768,17 +787,17 @@ async def predict(
         root_cause=result.primary_failure_mode,
         confidence=result.confidence,
         markdown_report=result.to_markdown(),
-        json_summary=result.to_json()
+        json_summary=result.to_json(),
     )
 
 
-@app.get("/alerts", response_model=List[AlertResponse])
+@app.get("/alerts", response_model=list[AlertResponse])
 async def list_alerts(
-    machine_id: Optional[str] = Query(None, description="Filter by machine"),
-    risk_level: Optional[str] = Query(None, description="Filter by risk level"),
+    machine_id: str | None = Query(None, description="Filter by machine"),
+    risk_level: str | None = Query(None, description="Filter by risk level"),
     limit: int = Query(100, le=1000, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     List stored alerts with optional filtering.
@@ -789,11 +808,7 @@ async def list_alerts(
     - Pagination: Handle large result sets
     """
     alerts = get_alerts(
-        db=db,
-        machine_id=machine_id,
-        risk_level=risk_level,
-        limit=limit,
-        offset=offset
+        db=db, machine_id=machine_id, risk_level=risk_level, limit=limit, offset=offset
     )
 
     return [
@@ -805,17 +820,14 @@ async def list_alerts(
             risk_level=a.risk_level,
             root_cause=a.root_cause,
             acknowledged=a.acknowledged,
-            created_at=a.created_at.isoformat() if a.created_at else ""
+            created_at=a.created_at.isoformat() if a.created_at else "",
         )
         for a in alerts
     ]
 
 
 @app.get("/alerts/{alert_id}")
-async def get_alert(
-    alert_id: int,
-    db: Session = Depends(get_db)
-):
+async def get_alert(alert_id: int, db: Session = Depends(get_db)):
     """
     Get a specific alert with full details including the Markdown report.
     """
@@ -827,16 +839,12 @@ async def get_alert(
         **alert.to_dict(),
         "report_md": alert.report_md,
         "raw_data": alert.raw_data,
-        "shap_values": alert.shap_values
+        "shap_values": alert.shap_values,
     }
 
 
 @app.post("/alerts/{alert_id}/acknowledge")
-async def acknowledge(
-    alert_id: int,
-    request: AcknowledgeRequest,
-    db: Session = Depends(get_db)
-):
+async def acknowledge(alert_id: int, request: AcknowledgeRequest, db: Session = Depends(get_db)):
     """
     Acknowledge an alert (for Alert Fatigue tracking - Paper 3).
 
@@ -850,7 +858,7 @@ async def acknowledge(
         alert_id=alert_id,
         acknowledged_by=request.acknowledged_by,
         action_taken=request.action_taken,
-        is_false_positive=request.is_false_positive
+        is_false_positive=request.is_false_positive,
     )
 
     if not alert:
@@ -861,9 +869,9 @@ async def acknowledge(
 
 @app.get("/fatigue")
 async def alert_fatigue_metrics(
-    machine_id: Optional[str] = Query(None, description="Filter by machine"),
+    machine_id: str | None = Query(None, description="Filter by machine"),
     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Alert Fatigue analysis (Paper 3 compliance).
@@ -886,7 +894,7 @@ async def alert_fatigue_metrics(
 if __name__ == "__main__":
     import uvicorn
 
-    host = os.getenv("API_HOST", "0.0.0.0")
+    host = os.getenv("API_HOST", "0.0.0.0")  # nosec B104
     port = int(os.getenv("API_PORT", "8000"))
 
     print(f"""
@@ -901,5 +909,5 @@ if __name__ == "__main__":
         host=host,
         port=port,
         reload=True,  # Auto-reload for development
-        log_level="info"
+        log_level="info",
     )

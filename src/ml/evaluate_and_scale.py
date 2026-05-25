@@ -8,33 +8,31 @@ Paper 3 Context: Industry average is 54% False Positive rate.
 Our goal: prove we can achieve <30% FP rate while maintaining >85% Recall.
 """
 
+import json
+import logging
 import time
 import tracemalloc
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Tuple
+
 import numpy as np
 import pandas as pd
-import logging
-import json
-
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import (
-    precision_recall_curve,
-    average_precision_score,
-    f1_score,
-    confusion_matrix
-)
-from imblearn.over_sampling import SMOTE
 import xgboost as xgb
+from imblearn.over_sampling import SMOTE
+from sklearn.metrics import (
+    average_precision_score,
+    confusion_matrix,
+    precision_recall_curve,
+)
+from sklearn.model_selection import StratifiedKFold
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SentinelX.Evaluate")
 
 
 # =============================================================================
 # PART 1: DEEP EVALUATION & THRESHOLD TUNING
 # =============================================================================
+
 
 def run_deep_evaluation():
     """
@@ -85,21 +83,27 @@ def run_deep_evaluation():
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-        smote = SMOTE(k_neighbors=5, sampling_strategy=0.5,
-                      random_state=42 + fold_idx)
+        smote = SMOTE(k_neighbors=5, sampling_strategy=0.5, random_state=42 + fold_idx)
         X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
 
         model = xgb.XGBClassifier(
-            n_estimators=500, max_depth=6, learning_rate=0.05,
-            subsample=0.8, colsample_bytree=0.7,
-            reg_alpha=0.1, reg_lambda=1.0,
-            min_child_weight=10, gamma=0.1,
-            scale_pos_weight=1.0, eval_metric="aucpr",
-            tree_method="hist", random_state=42, n_jobs=-1,
-            early_stopping_rounds=50
+            n_estimators=500,
+            max_depth=6,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.7,
+            reg_alpha=0.1,
+            reg_lambda=1.0,
+            min_child_weight=10,
+            gamma=0.1,
+            scale_pos_weight=1.0,
+            eval_metric="aucpr",
+            tree_method="hist",
+            random_state=42,
+            n_jobs=-1,
+            early_stopping_rounds=50,
         )
-        model.fit(X_resampled, y_resampled,
-                  eval_set=[(X_val, y_val)], verbose=False)
+        model.fit(X_resampled, y_resampled, eval_set=[(X_val, y_val)], verbose=False)
 
         y_proba = model.predict_proba(X_val)[:, 1]
         all_y_true.extend(y_val.values)
@@ -156,20 +160,28 @@ def run_deep_evaluation():
     balanced_rec = recalls[balanced_idx]
     balanced_f1 = f1_scores[balanced_idx]
 
-    logger.info(f"\n  {'Mode':<15} {'Threshold':<12} {'Precision':<12} {'Recall':<12} {'F1':<10} Use Case")
+    logger.info(
+        f"\n  {'Mode':<15} {'Threshold':<12} {'Precision':<12} {'Recall':<12} {'F1':<10} Use Case"
+    )
     logger.info(f"  {'─'*85}")
-    logger.info(f"  {'Ultra-Safe':<15} {ultra_safe_thresh:<12.4f} {ultra_safe_prec:<12.2%} {ultra_safe_rec:<12.2%} "
-                f"{2*ultra_safe_prec*ultra_safe_rec/(ultra_safe_prec+ultra_safe_rec+1e-8):<10.4f} "
-                f"Low-tolerance (aviation, nuclear)")
-    logger.info(f"  {'Balanced':<15} {balanced_thresh:<12.4f} {balanced_prec:<12.2%} {balanced_rec:<12.2%} "
-                f"{balanced_f1:<10.4f} "
-                f"General manufacturing")
-    logger.info(f"  {'Sensitive':<15} {sensitive_thresh:<12.4f} {sensitive_prec:<12.2%} {sensitive_rec:<12.2%} "
-                f"{2*sensitive_prec*sensitive_rec/(sensitive_prec+sensitive_rec+1e-8):<10.4f} "
-                f"High-value assets (turbines)")
+    logger.info(
+        f"  {'Ultra-Safe':<15} {ultra_safe_thresh:<12.4f} {ultra_safe_prec:<12.2%} {ultra_safe_rec:<12.2%} "
+        f"{2*ultra_safe_prec*ultra_safe_rec/(ultra_safe_prec+ultra_safe_rec+1e-8):<10.4f} "
+        f"Low-tolerance (aviation, nuclear)"
+    )
+    logger.info(
+        f"  {'Balanced':<15} {balanced_thresh:<12.4f} {balanced_prec:<12.2%} {balanced_rec:<12.2%} "
+        f"{balanced_f1:<10.4f} "
+        f"General manufacturing"
+    )
+    logger.info(
+        f"  {'Sensitive':<15} {sensitive_thresh:<12.4f} {sensitive_prec:<12.2%} {sensitive_rec:<12.2%} "
+        f"{2*sensitive_prec*sensitive_rec/(sensitive_prec+sensitive_rec+1e-8):<10.4f} "
+        f"High-value assets (turbines)"
+    )
 
     # --- PR Curve Visualization (ASCII) ---
-    logger.info("\n  PRECISION-RECALL CURVE (PR-AUC = {:.4f})".format(pr_auc))
+    logger.info(f"\n  PRECISION-RECALL CURVE (PR-AUC = {pr_auc:.4f})")
     logger.info("  " + "─" * 62)
 
     # Sample 20 points along the curve for ASCII display
@@ -203,12 +215,9 @@ def run_deep_evaluation():
 
     FP_COST = 500
     FN_COST = 5000
-    n_total = len(y_true)
     n_positives = y_true.sum()
-    n_negatives = n_total - n_positives
-
     best_profit_thresh = 0
-    best_profit = -float('inf')
+    best_profit = -float("inf")
     profit_data = []
 
     # Evaluate cost at multiple thresholds
@@ -225,93 +234,124 @@ def run_deep_evaluation():
         baseline_cost = n_positives * FN_COST  # Cost if we detect NOTHING
         net_savings = baseline_cost - total_cost
 
-        profit_data.append({
-            "threshold": thresh, "tp": tp, "fp": fp, "fn": fn, "tn": tn,
-            "cost": total_cost, "savings": net_savings,
-            "precision": tp / max(tp + fp, 1),
-            "recall": tp / max(tp + fn, 1),
-        })
+        profit_data.append(
+            {
+                "threshold": thresh,
+                "tp": tp,
+                "fp": fp,
+                "fn": fn,
+                "tn": tn,
+                "cost": total_cost,
+                "savings": net_savings,
+                "precision": tp / max(tp + fp, 1),
+                "recall": tp / max(tp + fn, 1),
+            }
+        )
 
         if net_savings > best_profit:
             best_profit = net_savings
             best_profit_thresh = thresh
-            best_profit_data = {"tp": tp, "fp": fp, "fn": fn, "tn": tn,
-                                "cost": total_cost, "savings": net_savings}
+            best_profit_data = {
+                "tp": tp,
+                "fp": fp,
+                "fn": fn,
+                "tn": tn,
+                "cost": total_cost,
+                "savings": net_savings,
+            }
 
     logger.info(f"  Baseline cost (detect nothing): ${n_positives * FN_COST:,.0f}")
     logger.info(f"  Optimal threshold: {best_profit_thresh:.4f}")
     logger.info(f"  Net savings at optimal: ${best_profit:,.0f}")
     logger.info(f"  Cost reduction: {best_profit / (n_positives * FN_COST) * 100:.1f}%")
 
-    logger.info(f"\n  {'Threshold':<12} {'Savings':<15} {'FP Cost':<12} {'FN Cost':<12} {'Net':<12}")
+    logger.info(
+        f"\n  {'Threshold':<12} {'Savings':<15} {'FP Cost':<12} {'FN Cost':<12} {'Net':<12}"
+    )
     logger.info(f"  {'─'*63}")
     for d in sorted(profit_data, key=lambda x: -x["savings"])[:5]:
         fp_cost = d["fp"] * FP_COST
         fn_cost = d["fn"] * FN_COST
-        logger.info(f"  {d['threshold']:<12.4f} ${d['savings']:<14,.0f} ${fp_cost:<11,.0f} ${fn_cost:<11,.0f} ${d['savings']:<11,.0f}")
+        logger.info(
+            f"  {d['threshold']:<12.4f} ${d['savings']:<14,.0f} ${fp_cost:<11,.0f} ${fn_cost:<11,.0f} ${d['savings']:<11,.0f}"
+        )
 
     # --- Confusion Matrix at Balanced Threshold ---
-    logger.info(f"\n" + "=" * 70)
+    logger.info("\n" + "=" * 70)
     logger.info(f"CONFUSION MATRIX (Balanced threshold = {balanced_thresh:.4f})")
     logger.info("=" * 70)
 
     y_pred_balanced = (y_proba >= balanced_thresh).astype(int)
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred_balanced).ravel()
 
-    logger.info(f"                    Predicted")
-    logger.info(f"                    Healthy    Failure")
+    logger.info("                    Predicted")
+    logger.info("                    Healthy    Failure")
     logger.info(f"  Actual Healthy    {tn:>7,}    {fp:>7,}   (FP rate: {fp/(fp+tn)*100:.1f}%)")
     logger.info(f"  Actual Failure    {fn:>7,}    {tp:>7,}   (Recall:  {tp/(tp+fn)*100:.1f}%)")
-    logger.info(f"")
-    logger.info(f"  Precision: {tp/(tp+fp)*100:.1f}% | Recall: {tp/(tp+fn)*100:.1f}% | "
-                f"F1: {2*tp/(2*tp+fp+fn)*100:.1f}%")
+    logger.info("")
+    logger.info(
+        f"  Precision: {tp/(tp+fp)*100:.1f}% | Recall: {tp/(tp+fn)*100:.1f}% | "
+        f"F1: {2*tp/(2*tp+fp+fn)*100:.1f}%"
+    )
 
     # --- Paper 3 Comparison ---
     our_fp_rate = fp / (fp + tn) * 100
     industry_fp_rate = 54.0
-    logger.info(f"\n  Paper 3 Comparison:")
+    logger.info("\n  Paper 3 Comparison:")
     logger.info(f"    Industry FP rate:  {industry_fp_rate:.0f}%")
     logger.info(f"    SentinelX FP rate: {our_fp_rate:.1f}%")
-    logger.info(f"    Improvement:       {industry_fp_rate - our_fp_rate:.1f} percentage points "
-                f"({(1 - our_fp_rate/industry_fp_rate)*100:.0f}% reduction)")
+    logger.info(
+        f"    Improvement:       {industry_fp_rate - our_fp_rate:.1f} percentage points "
+        f"({(1 - our_fp_rate/industry_fp_rate)*100:.0f}% reduction)"
+    )
 
     # --- Confusion Matrix at Cost-Optimal Threshold ---
     logger.info(f"\n  CONFUSION MATRIX (Cost-Optimal threshold = {best_profit_thresh:.4f})")
     y_pred_profit = (y_proba >= best_profit_thresh).astype(int)
     tn2, fp2, fn2, tp2 = confusion_matrix(y_true, y_pred_profit).ravel()
-    logger.info(f"                    Predicted")
-    logger.info(f"                    Healthy    Failure")
+    logger.info("                    Predicted")
+    logger.info("                    Healthy    Failure")
     logger.info(f"  Actual Healthy    {tn2:>7,}    {fp2:>7,}   (FP rate: {fp2/(fp2+tn2)*100:.1f}%)")
     logger.info(f"  Actual Failure    {fn2:>7,}    {tp2:>7,}   (Recall:  {tp2/(tp2+fn2)*100:.1f}%)")
-    logger.info(f"  Precision: {tp2/(tp2+fp2)*100:.1f}% | "
-                f"Annual savings: ${best_profit * 365 / 35:,.0f} (extrapolated)")
+    logger.info(
+        f"  Precision: {tp2/(tp2+fp2)*100:.1f}% | "
+        f"Annual savings: ${best_profit * 365 / 35:,.0f} (extrapolated)"
+    )
 
     # Save evaluation results
     eval_results = {
         "pr_auc": float(pr_auc),
         "thresholds": {
-            "ultra_safe": {"threshold": float(ultra_safe_thresh),
-                           "precision": float(ultra_safe_prec),
-                           "recall": float(ultra_safe_rec)},
-            "balanced": {"threshold": float(balanced_thresh),
-                         "precision": float(balanced_prec),
-                         "recall": float(balanced_rec),
-                         "f1": float(balanced_f1)},
-            "sensitive": {"threshold": float(sensitive_thresh),
-                          "precision": float(sensitive_prec),
-                          "recall": float(sensitive_rec)},
-            "cost_optimal": {"threshold": float(best_profit_thresh),
-                             "net_savings": float(best_profit),
-                             "tp": int(best_profit_data["tp"]),
-                             "fp": int(best_profit_data["fp"]),
-                             "fn": int(best_profit_data["fn"]),
-                             "tn": int(best_profit_data["tn"])},
+            "ultra_safe": {
+                "threshold": float(ultra_safe_thresh),
+                "precision": float(ultra_safe_prec),
+                "recall": float(ultra_safe_rec),
+            },
+            "balanced": {
+                "threshold": float(balanced_thresh),
+                "precision": float(balanced_prec),
+                "recall": float(balanced_rec),
+                "f1": float(balanced_f1),
+            },
+            "sensitive": {
+                "threshold": float(sensitive_thresh),
+                "precision": float(sensitive_prec),
+                "recall": float(sensitive_rec),
+            },
+            "cost_optimal": {
+                "threshold": float(best_profit_thresh),
+                "net_savings": float(best_profit),
+                "tp": int(best_profit_data["tp"]),
+                "fp": int(best_profit_data["fp"]),
+                "fn": int(best_profit_data["fn"]),
+                "tn": int(best_profit_data["tn"]),
+            },
         },
         "cost_assumptions": {"fp_cost": FP_COST, "fn_cost": FN_COST},
         "paper3_comparison": {
             "industry_fp_rate": industry_fp_rate,
             "sentinelx_fp_rate": float(our_fp_rate),
-        }
+        },
     }
 
     eval_path = Path("models/evaluation_results.json")
@@ -325,6 +365,7 @@ def run_deep_evaluation():
 # =============================================================================
 # PART 2: SCALE TEST (500K ROWS)
 # =============================================================================
+
 
 def generate_500k_data():
     """Generate 500K rows using the existing generator with updated config."""
@@ -340,20 +381,20 @@ def generate_500k_data():
     N_MACHINES = 5
     INTERVAL_MINUTES = 5
     START_TIME = datetime(2024, 1, 1, 0, 0, 0)
-    FAILURE_RATE = 0.034
-
-    logger.info(f"  Target: {N_ROWS:,} rows | {N_MACHINES} machines | "
-                f"{INTERVAL_MINUTES}-min intervals")
-    logger.info(f"  Time span: {N_ROWS * INTERVAL_MINUTES / N_MACHINES / 60 / 24:.0f} days per machine")
+    logger.info(
+        f"  Target: {N_ROWS:,} rows | {N_MACHINES} machines | " f"{INTERVAL_MINUTES}-min intervals"
+    )
+    logger.info(
+        f"  Time span: {N_ROWS * INTERVAL_MINUTES / N_MACHINES / 60 / 24:.0f} days per machine"
+    )
 
     t_start = time.time()
     tracemalloc.start()
 
     # === Temporal & Identity ===
-    timestamps = [START_TIME + timedelta(minutes=INTERVAL_MINUTES * i)
-                  for i in range(N_ROWS)]
+    timestamps = [START_TIME + timedelta(minutes=INTERVAL_MINUTES * i) for i in range(N_ROWS)]
     machine_ids = [f"M{(i % N_MACHINES) + 1}" for i in range(N_ROWS)]
-    product_types = np.random.choice(['L', 'M', 'H'], N_ROWS, p=[0.6, 0.3, 0.1])
+    product_types = np.random.choice(["L", "M", "H"], N_ROWS, p=[0.6, 0.3, 0.1])
 
     # === Tool Wear ===
     tool_wear = np.zeros(N_ROWS)
@@ -361,7 +402,7 @@ def generate_500k_data():
     for i in range(N_ROWS):
         mid = machine_ids[i]
         wear_increment = np.random.uniform(0.5, 3.0)
-        if product_types[i] == 'H':
+        if product_types[i] == "H":
             wear_increment *= 1.5
         wear_per_machine[mid] += wear_increment
         if wear_per_machine[mid] > 250:
@@ -372,9 +413,9 @@ def generate_500k_data():
     hours = np.array([t.hour + t.minute / 60 for t in timestamps])
     days = np.arange(N_ROWS) / (24 * 60 / INTERVAL_MINUTES)
 
-    air_temp = 300 + 3 * np.sin(2 * np.pi * hours / 24) + \
-               np.random.normal(0, 1.5, N_ROWS) + \
-               0.005 * days  # Seasonal drift
+    air_temp = (
+        300 + 3 * np.sin(2 * np.pi * hours / 24) + np.random.normal(0, 1.5, N_ROWS) + 0.005 * days
+    )  # Seasonal drift
 
     process_temp = air_temp + 10 + np.random.normal(0, 0.5, N_ROWS)
 
@@ -410,13 +451,16 @@ def generate_500k_data():
             failure_osf[i] = 1
         if np.random.random() < 0.002:
             failure_rnf[i] = 1
-        machine_failure[i] = int(any([failure_twf[i], failure_hdf[i],
-                                       failure_pwf[i], failure_osf[i], failure_rnf[i]]))
+        machine_failure[i] = int(
+            any([failure_twf[i], failure_hdf[i], failure_pwf[i], failure_osf[i], failure_rnf[i]])
+        )
 
     # === Maintenance Status ===
-    maintenance_status = np.where(machine_failure, 'Failure',
-                         np.where(tool_wear > 200, 'Warning',
-                         np.where(tool_wear > 150, 'Degrading', 'Normal')))
+    maintenance_status = np.where(
+        machine_failure,
+        "Failure",
+        np.where(tool_wear > 200, "Warning", np.where(tool_wear > 150, "Degrading", "Normal")),
+    )
 
     # === Network/Edge metrics ===
     network_latency = 10 + np.random.exponential(5, N_ROWS) + 0.002 * days
@@ -424,20 +468,30 @@ def generate_500k_data():
     fuzzy_pid = 0.5 + 0.3 * np.sin(2 * np.pi * hours / 12) + np.random.normal(0, 0.1, N_ROWS)
 
     # Build system_metrics DataFrame
-    sys_df = pd.DataFrame({
-        'timestamp': timestamps, 'machine_id': machine_ids,
-        'product_type': product_types,
-        'air_temperature_K': air_temp, 'process_temperature_K': process_temp,
-        'rotational_speed_rpm': rotational_speed, 'torque_Nm': torque,
-        'tool_wear_min': tool_wear, 'vibration_mm_s': vibration,
-        'pressure_psi': pressure, 'network_latency_ms': network_latency,
-        'edge_processing_time_ms': edge_processing, 'fuzzy_pid_output': fuzzy_pid,
-        'machine_failure': machine_failure,
-        'failure_TWF': failure_twf, 'failure_HDF': failure_hdf,
-        'failure_PWF': failure_pwf, 'failure_OSF': failure_osf,
-        'failure_RNF': failure_rnf,
-        'maintenance_status': maintenance_status,
-    })
+    sys_df = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "machine_id": machine_ids,
+            "product_type": product_types,
+            "air_temperature_K": air_temp,
+            "process_temperature_K": process_temp,
+            "rotational_speed_rpm": rotational_speed,
+            "torque_Nm": torque,
+            "tool_wear_min": tool_wear,
+            "vibration_mm_s": vibration,
+            "pressure_psi": pressure,
+            "network_latency_ms": network_latency,
+            "edge_processing_time_ms": edge_processing,
+            "fuzzy_pid_output": fuzzy_pid,
+            "machine_failure": machine_failure,
+            "failure_TWF": failure_twf,
+            "failure_HDF": failure_hdf,
+            "failure_PWF": failure_pwf,
+            "failure_OSF": failure_osf,
+            "failure_RNF": failure_rnf,
+            "maintenance_status": maintenance_status,
+        }
+    )
 
     # === Application Logs ===
     api_latency = 50 + 20 * (machine_failure * 5 + 1) + np.random.exponential(10, N_ROWS)
@@ -453,17 +507,24 @@ def generate_500k_data():
     anomaly_score_gen = np.clip(machine_failure * 0.7 + np.random.normal(0, 0.15, N_ROWS), 0, 1)
     is_anomaly = (anomaly_score_gen > 0.5).astype(int)
 
-    app_df = pd.DataFrame({
-        'timestamp': timestamps, 'machine_id': machine_ids,
-        'api_response_latency_ms': api_latency, 'error_rate_pct': error_rate,
-        'http_5xx_count': http_5xx, 'request_throughput_rps': throughput,
-        'queue_depth': queue_depth, 'cpu_utilization_pct': np.clip(cpu_util, 0, 100),
-        'memory_utilization_pct': np.clip(mem_util, 0, 100),
-        'packet_loss_pct': np.clip(packet_loss, 0, 100),
-        'disk_io_wait_ms': disk_io,
-        'anomaly_score': anomaly_score_gen, 'is_anomaly': is_anomaly,
-        'maintenance_status': maintenance_status,
-    })
+    app_df = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "machine_id": machine_ids,
+            "api_response_latency_ms": api_latency,
+            "error_rate_pct": error_rate,
+            "http_5xx_count": http_5xx,
+            "request_throughput_rps": throughput,
+            "queue_depth": queue_depth,
+            "cpu_utilization_pct": np.clip(cpu_util, 0, 100),
+            "memory_utilization_pct": np.clip(mem_util, 0, 100),
+            "packet_loss_pct": np.clip(packet_loss, 0, 100),
+            "disk_io_wait_ms": disk_io,
+            "anomaly_score": anomaly_score_gen,
+            "is_anomaly": is_anomaly,
+            "maintenance_status": maintenance_status,
+        }
+    )
 
     # Save to CSV
     scale_dir = Path("logs_500k")
@@ -484,17 +545,20 @@ def generate_500k_data():
     return scale_dir, gen_time, peak
 
 
-def run_scale_pipeline(data_dir: Path) -> Dict:
+def run_scale_pipeline(data_dir: Path) -> dict:
     """
     Run the full pipeline (Parquet conversion + Feature Engineering) on 500K rows.
     Measures time and memory at each stage.
     """
     import pyarrow as pa
     import pyarrow.parquet as pq
-    from stream_manager import StreamConfig, stream_csv, convert_to_parquet
     from feature_engineer import (
-        FeatureConfig, align_temporal, _process_chunk_with_buffer, CHUNK_SIZE
+        CHUNK_SIZE,
+        FeatureConfig,
+        _process_chunk_with_buffer,
+        align_temporal,
     )
+    from stream_manager import stream_csv
 
     logger.info("\n" + "=" * 70)
     logger.info("PIPELINE STRESS TEST: 500K rows")
@@ -537,7 +601,7 @@ def run_scale_pipeline(data_dir: Path) -> Dict:
 
     config = FeatureConfig(
         parquet_input_dir=str(parquet_dir),
-        feature_output_path="data/features/feature_matrix_500k.parquet"
+        feature_output_path="data/features/feature_matrix_500k.parquet",
     )
     input_dir = Path(config.parquet_input_dir)
     output_path = Path(config.feature_output_path)
@@ -575,8 +639,7 @@ def run_scale_pipeline(data_dir: Path) -> Dict:
         total_rows += len(processed)
 
         if (chunk_idx + 1) % 20 == 0:
-            logger.info(f"    Chunk {chunk_idx+1}/{n_chunks}: "
-                        f"{total_rows:,} rows processed")
+            logger.info(f"    Chunk {chunk_idx+1}/{n_chunks}: " f"{total_rows:,} rows processed")
 
     if writer:
         writer.close()
@@ -586,8 +649,11 @@ def run_scale_pipeline(data_dir: Path) -> Dict:
     _, stage2_peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    results["stage2"] = {"time_s": stage2_time, "peak_mb": stage2_peak / 1024 / 1024,
-                         "total_rows": total_rows}
+    results["stage2"] = {
+        "time_s": stage2_time,
+        "peak_mb": stage2_peak / 1024 / 1024,
+        "total_rows": total_rows,
+    }
     logger.info(f"  Time: {stage2_time:.1f}s | Peak RAM: {stage2_peak/1024/1024:.1f} MB")
     logger.info(f"  Output: {total_rows:,} rows written")
 
@@ -600,15 +666,17 @@ def run_scale_pipeline(data_dir: Path) -> Dict:
         "size_mb": output_size,
         "row_groups": output_file.metadata.num_row_groups,
     }
-    logger.info(f"  Output file: {output_size:.1f} MB, "
-                f"{output_file.metadata.num_rows:,} rows × {output_file.metadata.num_columns} cols")
+    logger.info(
+        f"  Output file: {output_size:.1f} MB, "
+        f"{output_file.metadata.num_rows:,} rows × {output_file.metadata.num_columns} cols"
+    )
 
     return results
 
 
 def run_drift_validation():
     """Validate PSI drift scores at 500K scale."""
-    from stream_manager import StreamConfig, DriftMonitor, stream_csv
+    from stream_manager import DriftMonitor, StreamConfig, stream_csv
 
     logger.info("\n" + "=" * 70)
     logger.info("DRIFT VALIDATION AT 500K SCALE")
@@ -629,7 +697,7 @@ def run_drift_validation():
     if chunk_psi:
         logger.info(f"  Chunks analyzed: {len(chunk_psi)}")
         logger.info(f"  Drift columns monitored: {list(chunk_psi[0].keys())}")
-        logger.info(f"\n  PSI Scores (last 5 chunks):")
+        logger.info("\n  PSI Scores (last 5 chunks):")
         logger.info(f"  {'Column':<30} {'PSI':<10} {'Status'}")
         logger.info(f"  {'─'*55}")
         for col, score in chunk_psi[-1].items():
@@ -640,13 +708,13 @@ def run_drift_validation():
         if len(chunk_psi) > 10:
             early_psi = np.mean([chunk_psi[i].get("air_temperature_K", 0) for i in range(5)])
             late_psi = np.mean([chunk_psi[i].get("air_temperature_K", 0) for i in range(-5, 0)])
-            logger.info(f"\n  Temporal drift progression (air_temperature_K):")
+            logger.info("\n  Temporal drift progression (air_temperature_K):")
             logger.info(f"    Early chunks (1-5):    PSI = {early_psi:.4f}")
             logger.info(f"    Late chunks (95-100):  PSI = {late_psi:.4f}")
             if late_psi > early_psi:
-                logger.info(f"    ✓ Drift increases over time (seasonal signal detected)")
+                logger.info("    ✓ Drift increases over time (seasonal signal detected)")
             else:
-                logger.info(f"    ~ No significant temporal drift progression")
+                logger.info("    ~ No significant temporal drift progression")
 
 
 # =============================================================================
@@ -677,18 +745,28 @@ if __name__ == "__main__":
 
     logger.info(f"  {'Metric':<25} {'50K (baseline)':<20} {'500K (scale)':<20} {'Ratio'}")
     logger.info(f"  {'─'*75}")
-    logger.info(f"  {'Data volume':<25} {'50,000 rows':<20} {'500,000 rows':<20} {scale_factor:.0f}x")
-    logger.info(f"  {'Feature Eng time':<25} {baseline_50k['stage2_time']:<20.1f}s "
-                f"{scale_results['stage2']['time_s']:<20.1f}s {time_ratio:.1f}x")
-    logger.info(f"  {'Peak RAM':<25} {baseline_50k['stage2_peak_mb']:<20.1f} MB "
-                f"{scale_results['stage2']['peak_mb']:<20.1f} MB "
-                f"{scale_results['stage2']['peak_mb']/max(baseline_50k['stage2_peak_mb'],1):.1f}x")
-    logger.info(f"  {'Output size':<25} {'41.3 MB':<20} {scale_results['output']['size_mb']:<20.1f} MB "
-                f"{scale_results['output']['size_mb']/41.3:.1f}x")
+    logger.info(
+        f"  {'Data volume':<25} {'50,000 rows':<20} {'500,000 rows':<20} {scale_factor:.0f}x"
+    )
+    logger.info(
+        f"  {'Feature Eng time':<25} {baseline_50k['stage2_time']:<20.1f}s "
+        f"{scale_results['stage2']['time_s']:<20.1f}s {time_ratio:.1f}x"
+    )
+    logger.info(
+        f"  {'Peak RAM':<25} {baseline_50k['stage2_peak_mb']:<20.1f} MB "
+        f"{scale_results['stage2']['peak_mb']:<20.1f} MB "
+        f"{scale_results['stage2']['peak_mb']/max(baseline_50k['stage2_peak_mb'],1):.1f}x"
+    )
+    logger.info(
+        f"  {'Output size':<25} {'41.3 MB':<20} {scale_results['output']['size_mb']:<20.1f} MB "
+        f"{scale_results['output']['size_mb']/41.3:.1f}x"
+    )
 
     linearity = time_ratio / scale_factor
-    logger.info(f"\n  Scaling linearity: {linearity:.2f} "
-                f"({'LINEAR (ideal)' if 0.8 < linearity < 1.3 else 'SUB-LINEAR (better than expected)' if linearity < 0.8 else 'SUPER-LINEAR (investigate)'})")
+    logger.info(
+        f"\n  Scaling linearity: {linearity:.2f} "
+        f"({'LINEAR (ideal)' if 0.8 < linearity < 1.3 else 'SUB-LINEAR (better than expected)' if linearity < 0.8 else 'SUPER-LINEAR (investigate)'})"
+    )
 
     logger.info(f"\n{'='*70}")
     logger.info("STAGE 4 & 5 COMPLETE — PRODUCTION READINESS VALIDATED")

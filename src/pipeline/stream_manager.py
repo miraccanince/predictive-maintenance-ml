@@ -12,14 +12,15 @@ Architecture References:
 - Paper 4 (Real-Time Quality): In-stream quality gates, not batch post-processing
 """
 
+import logging
+from collections.abc import Generator
 from dataclasses import dataclass, field
-from typing import Generator, Dict, Tuple, Optional, List
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SentinelX.StreamManager")
 
 
@@ -30,6 +31,7 @@ logger = logging.getLogger("SentinelX.StreamManager")
 # - Immutable configuration that travels with the pipeline
 # - Type-safe, IDE-friendly, serializable for experiment tracking
 # - When we move to AWS, this becomes a SageMaker ProcessingInput config
+
 
 @dataclass
 class StreamConfig:
@@ -51,22 +53,27 @@ class StreamConfig:
     # Paper 3: 54% of false positives come from data issues.
     # These bounds represent physical impossibilities, not statistical outliers.
     # A reading outside these bounds is DEFINITELY a sensor error, not an anomaly.
-    sensor_bounds: Dict[str, Tuple[float, float]] = field(default_factory=lambda: {
-        "air_temperature_K": (250.0, 350.0),        # Physical: below 250K or above 350K is instrument failure
-        "process_temperature_K": (260.0, 380.0),
-        "rotational_speed_rpm": (0.0, 5000.0),      # Motor physical limits
-        "torque_Nm": (0.0, 150.0),
-        "tool_wear_min": (0.0, 300.0),
-        "vibration_mm_s": (0.0, 100.0),
-        "pressure_psi": (0.0, 200.0),
-        "network_latency_ms": (0.0, 5000.0),        # >5s = connection timeout, not latency
-        "edge_processing_time_ms": (0.0, 300.0),
-        "api_response_latency_ms": (0.0, 10000.0),  # >10s = timeout
-        "cpu_utilization_pct": (0.0, 100.0),
-        "memory_utilization_pct": (0.0, 100.0),
-        "error_rate_pct": (0.0, 100.0),
-        "packet_loss_pct": (0.0, 100.0),
-    })
+    sensor_bounds: dict[str, tuple[float, float]] = field(
+        default_factory=lambda: {
+            "air_temperature_K": (
+                250.0,
+                350.0,
+            ),  # Physical: below 250K or above 350K is instrument failure
+            "process_temperature_K": (260.0, 380.0),
+            "rotational_speed_rpm": (0.0, 5000.0),  # Motor physical limits
+            "torque_Nm": (0.0, 150.0),
+            "tool_wear_min": (0.0, 300.0),
+            "vibration_mm_s": (0.0, 100.0),
+            "pressure_psi": (0.0, 200.0),
+            "network_latency_ms": (0.0, 5000.0),  # >5s = connection timeout, not latency
+            "edge_processing_time_ms": (0.0, 300.0),
+            "api_response_latency_ms": (0.0, 10000.0),  # >10s = timeout
+            "cpu_utilization_pct": (0.0, 100.0),
+            "memory_utilization_pct": (0.0, 100.0),
+            "error_rate_pct": (0.0, 100.0),
+            "packet_loss_pct": (0.0, 100.0),
+        }
+    )
 
     # --- Drift Detection ---
     # WHY PSI > 0.2?
@@ -76,14 +83,20 @@ class StreamConfig:
     #   PSI > 0.2  → Significant drift, retrain signal
     psi_threshold: float = 0.2
     psi_bins: int = 10
-    drift_columns: List[str] = field(default_factory=lambda: [
-        "air_temperature_K", "torque_Nm", "tool_wear_min",
-        "network_latency_ms", "api_response_latency_ms",
-        "error_rate_pct", "cpu_utilization_pct"
-    ])
+    drift_columns: list[str] = field(
+        default_factory=lambda: [
+            "air_temperature_K",
+            "torque_Nm",
+            "tool_wear_min",
+            "network_latency_ms",
+            "api_response_latency_ms",
+            "error_rate_pct",
+            "cpu_utilization_pct",
+        ]
+    )
 
     # --- Quality Gate ---
-    max_missing_pct: float = 5.0   # Flag chunk if >5% missing in any column
+    max_missing_pct: float = 5.0  # Flag chunk if >5% missing in any column
     latency_spike_multiplier: float = 3.0  # Flag if latency > 3x rolling median
 
 
@@ -101,6 +114,7 @@ class StreamConfig:
 # - Chunk = vectorized NumPy/Pandas ops within each chunk = fast
 # - Chunk size is the tuning knob between latency and throughput
 
+
 def stream_csv(filepath: str, chunk_size: int) -> Generator[pd.DataFrame, None, None]:
     """
     Generator that yields DataFrame chunks from a CSV file.
@@ -114,12 +128,14 @@ def stream_csv(filepath: str, chunk_size: int) -> Generator[pd.DataFrame, None, 
         filepath,
         chunksize=chunk_size,
         parse_dates=["timestamp"],
-        low_memory=True  # Prevents dtype inference on full file
+        low_memory=True,  # Prevents dtype inference on full file
     )
 
     for chunk_idx, chunk in enumerate(reader):
-        logger.debug(f"Yielding chunk {chunk_idx} from {filepath.name} "
-                     f"({len(chunk)} rows, {chunk['timestamp'].iloc[0]} → {chunk['timestamp'].iloc[-1]})")
+        logger.debug(
+            f"Yielding chunk {chunk_idx} from {filepath.name} "
+            f"({len(chunk)} rows, {chunk['timestamp'].iloc[0]} → {chunk['timestamp'].iloc[-1]})"
+        )
         yield chunk
 
 
@@ -135,8 +151,8 @@ def stream_parquet(filepath: str, chunk_size: int) -> Generator[pd.DataFrame, No
     """
     try:
         import pyarrow.parquet as pq
-    except ImportError:
-        raise ImportError("pyarrow required for Parquet support: pip install pyarrow")
+    except ImportError as e:
+        raise ImportError("pyarrow required for Parquet support: pip install pyarrow") from e
 
     filepath = Path(filepath)
     parquet_file = pq.ParquetFile(filepath)
@@ -160,13 +176,15 @@ def stream_parquet(filepath: str, chunk_size: int) -> Generator[pd.DataFrame, No
 # If we drop them, we lose the very events we're trying to detect.
 # Instead, we add a quality_flag column and let the model weigh it.
 
+
 @dataclass
 class QualityReport:
     """Report generated by the quality gate for each chunk."""
+
     chunk_idx: int
     total_rows: int
-    missing_counts: Dict[str, int] = field(default_factory=dict)
-    out_of_bounds_counts: Dict[str, int] = field(default_factory=dict)
+    missing_counts: dict[str, int] = field(default_factory=dict)
+    out_of_bounds_counts: dict[str, int] = field(default_factory=dict)
     latency_spikes: int = 0
     quality_score: float = 1.0  # 0.0 = terrible, 1.0 = perfect
     passed: bool = True
@@ -201,10 +219,10 @@ class QualityGate:
         self.config = config
         self._chunk_counter = 0
         # Rolling median for latency spike detection
-        self._latency_median: Optional[float] = None
+        self._latency_median: float | None = None
         self._latency_ema_alpha = 0.3  # Exponential moving average weight
 
-    def assess(self, chunk: pd.DataFrame) -> Tuple[pd.DataFrame, QualityReport]:
+    def assess(self, chunk: pd.DataFrame) -> tuple[pd.DataFrame, QualityReport]:
         """
         Assess a single chunk and return (flagged_chunk, report).
 
@@ -212,10 +230,7 @@ class QualityGate:
         - The chunk gets quality_flag column added (for model awareness)
         - The report goes to monitoring/alerting (for ops team awareness)
         """
-        report = QualityReport(
-            chunk_idx=self._chunk_counter,
-            total_rows=len(chunk)
-        )
+        report = QualityReport(chunk_idx=self._chunk_counter, total_rows=len(chunk))
         self._chunk_counter += 1
 
         # Initialize quality flag (0 = clean, bitwise flags for issues)
@@ -231,7 +246,7 @@ class QualityGate:
             missing_mask = chunk.isnull().any(axis=1)
             chunk.loc[missing_mask, "_quality_flag"] |= 1  # bit 0: missing data
             # Check if any column exceeds threshold
-            for col, count in missing_cols.items():
+            for _, count in missing_cols.items():
                 if (count / len(chunk) * 100) > self.config.max_missing_pct:
                     report.passed = False
 
@@ -266,15 +281,17 @@ class QualityGate:
             if self._latency_median is None:
                 self._latency_median = current_median
             else:
-                self._latency_median = (self._latency_ema_alpha * current_median +
-                                        (1 - self._latency_ema_alpha) * self._latency_median)
+                self._latency_median = (
+                    self._latency_ema_alpha * current_median
+                    + (1 - self._latency_ema_alpha) * self._latency_median
+                )
         report.latency_spikes = spike_count
 
         # --- Compute Quality Score ---
         total_issues = (
-            sum(report.missing_counts.values()) +
-            sum(report.out_of_bounds_counts.values()) +
-            report.latency_spikes
+            sum(report.missing_counts.values())
+            + sum(report.out_of_bounds_counts.values())
+            + report.latency_spikes
         )
         max_possible_issues = len(chunk) * len(chunk.columns)
         report.quality_score = 1.0 - min(total_issues / max_possible_issues, 1.0)
@@ -296,6 +313,7 @@ class QualityGate:
 #
 # Formula: PSI = Σ (actual_% - expected_%) × ln(actual_% / expected_%)
 
+
 class DriftMonitor:
     """
     Lightweight distribution shift detector using Population Stability Index.
@@ -306,13 +324,14 @@ class DriftMonitor:
 
     def __init__(self, config: StreamConfig):
         self.config = config
-        self._reference_bins: Dict[str, np.ndarray] = {}
-        self._reference_edges: Dict[str, np.ndarray] = {}
+        self._reference_bins: dict[str, np.ndarray] = {}
+        self._reference_edges: dict[str, np.ndarray] = {}
         self._is_baseline_set = False
-        self._drift_history: List[Dict[str, float]] = []
+        self._drift_history: list[dict[str, float]] = []
 
-    def _compute_bins(self, values: np.ndarray, edges: Optional[np.ndarray] = None
-                      ) -> Tuple[np.ndarray, np.ndarray]:
+    def _compute_bins(
+        self, values: np.ndarray, edges: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Bin values into histogram, returning proportions and edges."""
         values = values[~np.isnan(values)]
         if edges is None:
@@ -341,9 +360,11 @@ class DriftMonitor:
             self._reference_edges[col] = edges
 
         self._is_baseline_set = True
-        logger.info(f"Drift baseline set from {len(chunk)} rows across {len(self._reference_bins)} columns")
+        logger.info(
+            f"Drift baseline set from {len(chunk)} rows across {len(self._reference_bins)} columns"
+        )
 
-    def check_drift(self, chunk: pd.DataFrame) -> Dict[str, float]:
+    def check_drift(self, chunk: pd.DataFrame) -> dict[str, float]:
         """
         Compute PSI for each monitored column in the current chunk.
 
@@ -365,8 +386,8 @@ class DriftMonitor:
 
             # PSI formula
             psi = np.sum(
-                (actual_proportions - expected_proportions) *
-                np.log(actual_proportions / expected_proportions)
+                (actual_proportions - expected_proportions)
+                * np.log(actual_proportions / expected_proportions)
             )
             psi_scores[col] = round(float(psi), 6)
 
@@ -386,6 +407,7 @@ class DriftMonitor:
 # - Single entry point: consumer code doesn't know about CSV vs Parquet
 # - Composable: add new stages (feature engineering, model inference) later
 # - Testable: each component tested in isolation, pipeline tested end-to-end
+
 
 class StreamPipeline:
     """
@@ -413,9 +435,7 @@ class StreamPipeline:
             return stream_parquet(filepath, self.config.chunk_size)
         return stream_csv(filepath, self.config.chunk_size)
 
-    def stream(self) -> Generator[
-        Tuple[pd.DataFrame, pd.DataFrame, Dict], None, None
-    ]:
+    def stream(self) -> Generator[tuple[pd.DataFrame, pd.DataFrame, dict], None, None]:
         """
         Main streaming generator. Yields:
             (system_chunk, app_chunk, metadata_dict)
@@ -441,10 +461,7 @@ class StreamPipeline:
                 "system_quality": sys_report,
                 "app_quality": app_report,
                 "drift_scores": drift_scores,
-                "time_range": (
-                    sys_chunk["timestamp"].iloc[0],
-                    sys_chunk["timestamp"].iloc[-1]
-                ),
+                "time_range": (sys_chunk["timestamp"].iloc[0], sys_chunk["timestamp"].iloc[-1]),
                 "chunk_size": len(sys_chunk),
             }
 
@@ -466,7 +483,8 @@ class StreamPipeline:
 # This is a one-time migration step. After conversion, the pipeline
 # reads Parquet by default for all subsequent runs.
 
-def convert_to_parquet(config: StreamConfig) -> Tuple[str, str]:
+
+def convert_to_parquet(config: StreamConfig) -> tuple[str, str]:
     """
     Convert CSV sources to Parquet format.
     Returns paths to the new Parquet files.
@@ -474,8 +492,8 @@ def convert_to_parquet(config: StreamConfig) -> Tuple[str, str]:
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
-    except ImportError:
-        raise ImportError("pyarrow required: pip install pyarrow")
+    except ImportError as e:
+        raise ImportError("pyarrow required: pip install pyarrow") from e
 
     output_dir = Path(config.parquet_output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -499,7 +517,9 @@ def convert_to_parquet(config: StreamConfig) -> Tuple[str, str]:
         csv_size = csv_path.stat().st_size / 1024 / 1024
         pq_size = parquet_path.stat().st_size / 1024 / 1024
         ratio = (1 - pq_size / csv_size) * 100
-        logger.info(f"Converted {csv_path.name}: {csv_size:.1f}MB → {pq_size:.1f}MB ({ratio:.0f}% reduction)")
+        logger.info(
+            f"Converted {csv_path.name}: {csv_size:.1f}MB → {pq_size:.1f}MB ({ratio:.0f}% reduction)"
+        )
         converted.append(str(parquet_path))
 
     return tuple(converted)
@@ -520,7 +540,7 @@ if __name__ == "__main__":
     total_rows = 0
     all_drift = []
 
-    for sys_chunk, app_chunk, metadata in pipeline.stream():
+    for _, _, metadata in pipeline.stream():
         chunk_count += 1
         total_rows += metadata["chunk_size"]
 
@@ -530,12 +550,14 @@ if __name__ == "__main__":
         # Stop after a few chunks for demo
         if chunk_count >= 3:
             print(f"\n[Demo: processed {chunk_count} chunks, {total_rows:,} rows]")
-            print(f"[Stopping early — remove the break to process all {config.chunk_size * 10} rows]")
+            print(
+                f"[Stopping early — remove the break to process all {config.chunk_size * 10} rows]"
+            )
             break
 
     # --- Drift Summary ---
     if all_drift:
-        print(f"\nDrift scores (last chunk):")
+        print("\nDrift scores (last chunk):")
         for col, score in all_drift[-1].items():
             status = "OK" if score < 0.1 else ("MONITOR" if score < 0.2 else "DRIFT!")
             print(f"  {col:<30}: PSI={score:.4f} [{status}]")

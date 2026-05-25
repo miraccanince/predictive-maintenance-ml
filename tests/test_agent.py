@@ -1,10 +1,11 @@
 """
 Unit tests for the SentinelX Diagnostic Agent.
 """
-import pytest
+
 import json
 from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock
+
+import pytest
 
 
 class TestDiagnosticEngine:
@@ -64,13 +65,16 @@ class TestDiagnosticEngine:
 class TestRiskLevelMapping:
     """Test risk level determination logic."""
 
-    @pytest.mark.parametrize("probability,expected_risk", [
-        (0.05, "nominal"),
-        (0.15, "low"),
-        (0.35, "moderate"),
-        (0.65, "high"),
-        (0.90, "critical"),
-    ])
+    @pytest.mark.parametrize(
+        "probability,expected_risk",
+        [
+            (0.05, "nominal"),
+            (0.15, "low"),
+            (0.35, "moderate"),
+            (0.65, "high"),
+            (0.90, "critical"),
+        ],
+    )
     def test_probability_to_risk_level(self, probability, expected_risk):
         """Test mapping from probability to risk level."""
         # Thresholds from agent.py
@@ -129,7 +133,9 @@ class TestSHAPImportance:
         top_features = importance_list[:10]
 
         for entry in top_features:
-            assert entry["mean_abs_shap"] >= 0, f"Feature {entry['feature']} has negative importance"
+            assert (
+                entry["mean_abs_shap"] >= 0
+            ), f"Feature {entry['feature']} has negative importance"
 
 
 class TestLLMPromptConstruction:
@@ -143,7 +149,7 @@ class TestLLMPromptConstruction:
             "thermal_efficiency_idx",
             "power_anomaly_score",
             "stress_ratio",
-            "process_temp_gradient"
+            "process_temp_gradient",
         ]
 
         # This would import from agent.py if available
@@ -157,11 +163,11 @@ class TestLLMPromptConstruction:
             "high": "Urgent maintenance needed",
             "moderate": "Schedule maintenance soon",
             "low": "Monitor closely",
-            "nominal": "Normal operation"
+            "nominal": "Normal operation",
         }
 
         assert len(risk_levels) == 5
-        for level, desc in risk_levels.items():
+        for _level, desc in risk_levels.items():
             assert len(desc) > 0
 
 
@@ -176,7 +182,7 @@ class TestFallbackBehavior:
             "root_cause": "mechanical_wear",
             "confidence": "moderate",
             "recommended_action": "Schedule maintenance inspection",
-            "source": "rule-based"
+            "source": "rule-based",
         }
 
         # Verify structure
@@ -208,7 +214,9 @@ class TestOllamaIntegration:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{ollama_url}/api/tags", timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                async with session.get(
+                    f"{ollama_url}/api/tags", timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         assert "models" in data

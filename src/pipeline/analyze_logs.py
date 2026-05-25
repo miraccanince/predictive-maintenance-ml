@@ -1,8 +1,8 @@
-import os
 import csv
-from collections import Counter
+import os
 
 LOG_DIR = "logs"
+
 
 def file_summary(filepath):
     size = os.path.getsize(filepath)
@@ -19,21 +19,21 @@ def file_summary(filepath):
     # Count lines (sample-based estimate for large files)
     line_count = 0
     sample_lines = []
-    with open(filepath, "r", errors="replace") as f:
+    with open(filepath, errors="replace") as f:
         for i, line in enumerate(f):
             line_count += 1
             if i < 10:
                 sample_lines.append(line.rstrip())
             if line_count >= 100000 and size > 100_000_000:
                 # Estimate for large files
-                avg_line_len = sum(len(l) for l in sample_lines) / len(sample_lines)
+                avg_line_len = sum(len(ln) for ln in sample_lines) / len(sample_lines)
                 estimated_lines = int(size / avg_line_len)
                 print(f"Lines (estimated): ~{estimated_lines:,}")
                 break
         else:
             print(f"Lines: {line_count:,}")
 
-    print(f"\nFirst 5 lines:")
+    print("\nFirst 5 lines:")
     for line in sample_lines[:5]:
         print(f"  {line[:200]}")
 
@@ -42,7 +42,7 @@ def file_summary(filepath):
 
 def analyze_csv(filepath):
     file_summary(filepath)
-    with open(filepath, "r", errors="replace") as f:
+    with open(filepath, errors="replace") as f:
         reader = csv.reader(f)
         header = next(reader, None)
         if header:
@@ -56,7 +56,7 @@ def analyze_csv(filepath):
                     break
                 rows.append(row)
             if rows:
-                print(f"\nSample data (first 3 rows):")
+                print("\nSample data (first 3 rows):")
                 for row in rows[:3]:
                     print(f"  {row[:10]}")  # first 10 cols max
 
@@ -65,7 +65,7 @@ def analyze_log(filepath):
     sample = file_summary(filepath)
     # Try to detect log format
     if sample:
-        print(f"\nFormat analysis:")
+        print("\nFormat analysis:")
         # Check if it looks like Apache/Nginx access log
         if " - - [" in sample[0] or "HTTP/" in sample[0]:
             print("  Detected: Apache/Nginx access log format")

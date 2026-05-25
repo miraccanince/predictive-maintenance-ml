@@ -29,31 +29,24 @@ Mathematical Rationale for XGBoost:
 5. Monotonic constraints available (can enforce "more wear = more risk")
 """
 
+import json
+import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Tuple
 from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
-import logging
-import json
-import joblib
-
-from sklearn.model_selection import StratifiedKFold
+import shap
+import xgboost as xgb
+from imblearn.over_sampling import SMOTE
 from sklearn.metrics import (
-    precision_recall_curve,
     average_precision_score,
     f1_score,
-    classification_report,
-    confusion_matrix
 )
-from imblearn.over_sampling import SMOTE
-import xgboost as xgb
-import shap
+from sklearn.model_selection import StratifiedKFold
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SentinelX.Trainer")
 
 
@@ -64,6 +57,7 @@ logger = logging.getLogger("SentinelX.Trainer")
 # - Hyperparameters are tuned independently of feature engineering
 # - Experiment tracking (MLflow/W&B) logs this config per run
 # - Reproducibility: same config + same data = same model
+
 
 @dataclass
 class TrainConfig:
@@ -89,14 +83,22 @@ class TrainConfig:
     #   (TWF, HDF, PWF, OSF, RNF) — including them = circular prediction
     # - maintenance_status: derived from failure state = leakage
     # - anomaly_score / is_anomaly: correlated labels, not features
-    exclude_cols: List[str] = field(default_factory=lambda: [
-        "timestamp", "machine_id", "product_type",
-        "machine_failure",
-        "failure_TWF", "failure_HDF", "failure_PWF",
-        "failure_OSF", "failure_RNF",
-        "maintenance_status",
-        "anomaly_score", "is_anomaly",
-    ])
+    exclude_cols: list[str] = field(
+        default_factory=lambda: [
+            "timestamp",
+            "machine_id",
+            "product_type",
+            "machine_failure",
+            "failure_TWF",
+            "failure_HDF",
+            "failure_PWF",
+            "failure_OSF",
+            "failure_RNF",
+            "maintenance_status",
+            "anomaly_score",
+            "is_anomaly",
+        ]
+    )
 
     # --- Cross-Validation ---
     # WHY 5-Fold Stratified?
@@ -136,27 +138,29 @@ class TrainConfig:
 
     # --- XGBoost Hyperparameters ---
     # WHY these specific values?
-    xgb_params: Dict = field(default_factory=lambda: {
-        "n_estimators": 500,        # Enough trees to converge; early stopping prevents excess
-        "max_depth": 6,             # Paper 2: depth 5-7 optimal for sensor data
-                                    # Deeper = more interactions but overfitting risk
-        "learning_rate": 0.05,      # Low rate + many trees = more stable than 0.3 + few trees
-        "subsample": 0.8,           # Row subsampling — regularization (like bagging)
-        "colsample_bytree": 0.7,    # Column subsampling — reduces feature co-dependency
-                                    # With 136 features, each tree sees ~95 columns
-        "reg_alpha": 0.1,           # L1 regularization — drives unimportant features to zero
-        "reg_lambda": 1.0,          # L2 regularization — smooths leaf weights
-        "min_child_weight": 10,     # Minimum samples per leaf — prevents overfitting to
-                                    # rare edge cases in the minority class
-        "gamma": 0.1,               # Minimum loss reduction for split — prunes weak splits
-        "scale_pos_weight": 1.0,    # Set to 1.0 because SMOTE handles imbalance externally.
-                                    # Using BOTH SMOTE + scale_pos_weight = double-correction
-                                    # (Paper 2 warns against this — pick ONE strategy).
-        "eval_metric": "aucpr",     # Early stopping on PR-AUC (not logloss)
-        "tree_method": "hist",      # Histogram-based splits — fast for 50K+ rows
-        "random_state": 42,
-        "n_jobs": -1,               # Use all CPU cores
-    })
+    xgb_params: dict = field(
+        default_factory=lambda: {
+            "n_estimators": 500,  # Enough trees to converge; early stopping prevents excess
+            "max_depth": 6,  # Paper 2: depth 5-7 optimal for sensor data
+            # Deeper = more interactions but overfitting risk
+            "learning_rate": 0.05,  # Low rate + many trees = more stable than 0.3 + few trees
+            "subsample": 0.8,  # Row subsampling — regularization (like bagging)
+            "colsample_bytree": 0.7,  # Column subsampling — reduces feature co-dependency
+            # With 136 features, each tree sees ~95 columns
+            "reg_alpha": 0.1,  # L1 regularization — drives unimportant features to zero
+            "reg_lambda": 1.0,  # L2 regularization — smooths leaf weights
+            "min_child_weight": 10,  # Minimum samples per leaf — prevents overfitting to
+            # rare edge cases in the minority class
+            "gamma": 0.1,  # Minimum loss reduction for split — prunes weak splits
+            "scale_pos_weight": 1.0,  # Set to 1.0 because SMOTE handles imbalance externally.
+            # Using BOTH SMOTE + scale_pos_weight = double-correction
+            # (Paper 2 warns against this — pick ONE strategy).
+            "eval_metric": "aucpr",  # Early stopping on PR-AUC (not logloss)
+            "tree_method": "hist",  # Histogram-based splits — fast for 50K+ rows
+            "random_state": 42,
+            "n_jobs": -1,  # Use all CPU cores
+        }
+    )
 
     # --- Early Stopping ---
     early_stopping_rounds: int = 50  # Stop if no PR-AUC improvement for 50 rounds
@@ -170,7 +174,8 @@ class TrainConfig:
 # - Validates feature matrix integrity before expensive training
 # - Logs feature count and class distribution for reproducibility
 
-def load_feature_matrix(config: TrainConfig) -> Tuple[pd.DataFrame, pd.Series, List[str]]:
+
+def load_feature_matrix(config: TrainConfig) -> tuple[pd.DataFrame, pd.Series, list[str]]:
     """
     Load the Golden Dataset and separate features from target.
 
@@ -211,8 +216,9 @@ def load_feature_matrix(config: TrainConfig) -> Tuple[pd.DataFrame, pd.Series, L
     n_nan_before = X.isna().sum().sum()
     if n_nan_before > 0:
         X = X.fillna(0)
-        logger.info(f"  NaN imputation: {n_nan_before:,} cells filled with 0 "
-                    f"(lag/rolling warm-up rows)")
+        logger.info(
+            f"  NaN imputation: {n_nan_before:,} cells filled with 0 " f"(lag/rolling warm-up rows)"
+        )
 
     # --- Log class distribution ---
     n_pos = y.sum()
@@ -251,12 +257,10 @@ def load_feature_matrix(config: TrainConfig) -> Tuple[pd.DataFrame, pd.Series, L
 # Paper 2: "SMOTE must be applied within the cross-validation loop
 # to prevent optimistic bias in performance estimates."
 
+
 def train_with_cv(
-    X: pd.DataFrame,
-    y: pd.Series,
-    feature_names: List[str],
-    config: TrainConfig
-) -> Tuple[xgb.XGBClassifier, Dict]:
+    X: pd.DataFrame, y: pd.Series, feature_names: list[str], config: TrainConfig
+) -> tuple[xgb.XGBClassifier, dict]:
     """
     Train XGBoost with Stratified K-Fold CV and per-fold SMOTE.
 
@@ -274,11 +278,7 @@ def train_with_cv(
     Returns:
         (best_model, metrics_dict): Trained model and CV metrics
     """
-    skf = StratifiedKFold(
-        n_splits=config.n_folds,
-        shuffle=True,
-        random_state=config.random_state
-    )
+    skf = StratifiedKFold(n_splits=config.n_folds, shuffle=True, random_state=config.random_state)
 
     # --- Per-fold metrics storage ---
     fold_metrics = {
@@ -313,16 +313,19 @@ def train_with_cv(
         smote = SMOTE(
             k_neighbors=config.smote_k_neighbors,
             sampling_strategy=config.smote_sampling_strategy,
-            random_state=config.random_state + fold_idx  # Different seed per fold
+            random_state=config.random_state + fold_idx,  # Different seed per fold
         )
 
         X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
 
         n_synthetic = len(X_train_resampled) - len(X_train)
-        logger.info(f"  SMOTE: {len(X_train):,} → {len(X_train_resampled):,} "
-                    f"(+{n_synthetic:,} synthetic failures)")
-        logger.info(f"  Train class ratio after SMOTE: "
-                    f"{y_train_resampled.mean()*100:.1f}% positive")
+        logger.info(
+            f"  SMOTE: {len(X_train):,} → {len(X_train_resampled):,} "
+            f"(+{n_synthetic:,} synthetic failures)"
+        )
+        logger.info(
+            f"  Train class ratio after SMOTE: " f"{y_train_resampled.mean()*100:.1f}% positive"
+        )
 
         # --- Train XGBoost with early stopping ---
         # WHY early stopping on val set?
@@ -332,17 +335,16 @@ def train_with_cv(
         # - Overfitting to SMOTE's synthetic samples
         # - Wasting compute on trees that don't improve generalization
         model = xgb.XGBClassifier(
-            **config.xgb_params,
-            early_stopping_rounds=config.early_stopping_rounds
+            **config.xgb_params, early_stopping_rounds=config.early_stopping_rounds
         )
 
-        model.fit(
-            X_train_resampled, y_train_resampled,
-            eval_set=[(X_val, y_val)],
-            verbose=False
-        )
+        model.fit(X_train_resampled, y_train_resampled, eval_set=[(X_val, y_val)], verbose=False)
 
-        best_iteration = model.best_iteration + 1 if model.best_iteration is not None else config.xgb_params["n_estimators"]
+        best_iteration = (
+            model.best_iteration + 1
+            if model.best_iteration is not None
+            else config.xgb_params["n_estimators"]
+        )
 
         # --- Evaluate on REAL (unaugmented) validation data ---
         # WHY predict_proba, not predict?
@@ -375,9 +377,11 @@ def train_with_cv(
         fold_metrics["recall"].append(recall)
         fold_metrics["best_n_trees"].append(best_iteration)
 
-        logger.info(f"  Results: PR-AUC={pr_auc:.4f}, F1={f1:.4f}, "
-                    f"Precision={precision:.4f}, Recall={recall:.4f}, "
-                    f"Trees={best_iteration}")
+        logger.info(
+            f"  Results: PR-AUC={pr_auc:.4f}, F1={f1:.4f}, "
+            f"Precision={precision:.4f}, Recall={recall:.4f}, "
+            f"Trees={best_iteration}"
+        )
 
     # --- Aggregate CV Metrics ---
     logger.info("\n" + "=" * 60)
@@ -403,7 +407,7 @@ def train_with_cv(
     smote_final = SMOTE(
         k_neighbors=config.smote_k_neighbors,
         sampling_strategy=config.smote_sampling_strategy,
-        random_state=config.random_state
+        random_state=config.random_state,
     )
     X_full_resampled, y_full_resampled = smote_final.fit_resample(X, y)
 
@@ -415,8 +419,9 @@ def train_with_cv(
     final_model = xgb.XGBClassifier(**final_params)
     final_model.fit(X_full_resampled, y_full_resampled, verbose=False)
 
-    logger.info(f"  Final model trained: {optimal_n_trees} trees, "
-                f"{final_model.n_features_in_} features")
+    logger.info(
+        f"  Final model trained: {optimal_n_trees} trees, " f"{final_model.n_features_in_} features"
+    )
 
     return final_model, cv_summary
 
@@ -441,12 +446,13 @@ def train_with_cv(
 # (thermal_efficiency, power_anomaly) actually matter to the model.
 # If they don't appear in top-10, our Paper 1 hypothesis was wrong.
 
+
 def compute_shap_analysis(
     model: xgb.XGBClassifier,
     X: pd.DataFrame,
-    feature_names: List[str],
+    feature_names: list[str],
     output_dir: Path,
-    n_samples: int = 5000
+    n_samples: int = 5000,
 ) -> np.ndarray:
     """
     Compute SHAP values and save summary data for visualization.
@@ -489,14 +495,13 @@ def compute_shap_analysis(
     # --- Top Features by Mean |SHAP| ---
     # Mean absolute SHAP = average impact on prediction across all samples
     mean_abs_shap = np.abs(shap_values).mean(axis=0)
-    feature_importance = pd.DataFrame({
-        "feature": feature_names,
-        "mean_abs_shap": mean_abs_shap
-    }).sort_values("mean_abs_shap", ascending=False)
+    feature_importance = pd.DataFrame(
+        {"feature": feature_names, "mean_abs_shap": mean_abs_shap}
+    ).sort_values("mean_abs_shap", ascending=False)
 
     logger.info("\nTop 15 Features by SHAP Importance:")
     logger.info("-" * 55)
-    for idx, row in feature_importance.head(15).iterrows():
+    for _, row in feature_importance.head(15).iterrows():
         bar_len = int(row["mean_abs_shap"] / feature_importance["mean_abs_shap"].max() * 30)
         bar = "█" * bar_len
         logger.info(f"  {row['feature']:<40} {row['mean_abs_shap']:.4f} {bar}")
@@ -531,12 +536,13 @@ def compute_shap_analysis(
 # 4. CV metrics (to compare against future model versions)
 # 5. SHAP data (for the LLM Agent's diagnostic explanations)
 
+
 def save_model_artifacts(
     model: xgb.XGBClassifier,
-    feature_names: List[str],
-    cv_metrics: Dict,
+    feature_names: list[str],
+    cv_metrics: dict,
     config: TrainConfig,
-    output_dir: Path
+    output_dir: Path,
 ) -> None:
     """
     Save all model artifacts for production deployment.
@@ -588,7 +594,8 @@ def save_model_artifacts(
 # 6. PIPELINE ORCHESTRATOR
 # =============================================================================
 
-def run_training_pipeline(config: Optional[TrainConfig] = None) -> Path:
+
+def run_training_pipeline(config: TrainConfig | None = None) -> Path:
     """
     Execute the full training pipeline: Load → SMOTE+CV → SHAP → Save.
 
@@ -618,7 +625,7 @@ def run_training_pipeline(config: Optional[TrainConfig] = None) -> Path:
 
     # --- Step 3: SHAP Analysis ---
     logger.info("\nStep 3/4: SHAP Explainability Analysis")
-    shap_values = compute_shap_analysis(model, X, feature_names, output_dir)
+    compute_shap_analysis(model, X, feature_names, output_dir)
 
     # --- Step 4: Save Artifacts ---
     logger.info("\nStep 4/4: Saving Model Artifacts")

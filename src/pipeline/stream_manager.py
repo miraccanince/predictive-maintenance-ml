@@ -36,8 +36,8 @@ class StreamConfig:
     """Pipeline configuration for data ingestion."""
 
     # --- Paths ---
-    system_metrics_path: str = "logs/system_metrics.csv"
-    application_logs_path: str = "logs/application_logs.csv"
+    system_metrics_path: str = "data/raw/system_metrics.csv"
+    application_logs_path: str = "data/raw/application_logs.csv"
     parquet_output_dir: str = "data/parquet"
 
     # --- Chunking ---

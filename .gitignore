@@ -72,13 +72,13 @@ config.local.yaml
 data/features/*.parquet
 data/parquet/*.parquet
 data/parquet_500k/
-logs/*.csv
-logs_500k/
+data/raw/*.csv
+data/raw_500k/
 
 # Keep directory structure
 !data/features/.gitkeep
 !data/parquet/.gitkeep
-!logs/.gitkeep
+!data/raw/.gitkeep
 
 # -------------------- ML Models & Artifacts --------------------
 # Trained models (regenerate via notebooks or download from model registry)

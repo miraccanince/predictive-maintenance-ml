@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1280">
+  <title>SentinelX</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #fff;
+      color: #111;
+      width: 1280px;
+      height: 800px;
+      overflow: hidden;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    /* ── header ── */
+    header {
+      height: 44px;
+      border-bottom: 2px solid #111;
+      padding: 0 22px;
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+    .h-title { font-size: 14.5px; font-weight: 600; letter-spacing: -0.2px; }
+    .h-sep   { color: #ccc; margin: 0 12px; }
+    .h-sub   { font-size: 11.5px; color: #555; font-style: italic; }
+    .h-sp    { flex: 1; }
+    .h-stack { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #bbb; letter-spacing: 0.2px; }
+
+    /* ── insight strip ── */
+    .insight {
+      border-bottom: 1px solid #ddd;
+      padding: 8px 22px;
+      background: #fafafa;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 11.5px;
+    }
+    .insight .hook  { font-weight: 600; color: #111; flex-shrink: 0; }
+    .insight .body  { color: #444; }
+    .insight .pills { margin-left: 10px; display: flex; gap: 6px; flex-shrink: 0; }
+    .pill {
+      font-size: 9.5px;
+      color: #888;
+      border: 1px solid #ddd;
+      padding: 1px 6px;
+      border-radius: 2px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* ── workflow ── */
+    .workflow {
+      border-bottom: 1px solid #ddd;
+      padding: 13px 22px 11px;
+    }
+    .sec-label {
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: #bbb;
+      margin-bottom: 11px;
+    }
+
+    .pipeline { display: flex; align-items: center; }
+    .arr { color: #ccc; font-size: 14px; padding: 0 7px; flex-shrink: 0; user-select: none; }
+
+    .node {
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 5px 9px;
+      background: #fff;
+      flex-shrink: 0;
+      text-align: center;
+    }
+    .node .nt  { font-size: 11px; font-weight: 500; }
+    .node .ns  { font-size: 9px; color: #999; margin-top: 2px; font-family: 'JetBrains Mono', monospace; line-height: 1.4; }
+
+    .node-pair { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+    .node-pair .node { text-align: left; }
+
+    .thr-row {
+      margin-top: 10px;
+      padding-top: 9px;
+      border-top: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      gap: 0;
+      font-size: 10.5px;
+    }
+    .thr-label { color: #aaa; font-size: 9.5px; margin-right: 12px; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
+    .thr-mode  { color: #444; margin-right: 4px; }
+    .thr-mode b { font-weight: 500; color: #111; }
+    .thr-dot   { color: #ddd; margin: 0 10px; }
+    .thr-note  { margin-left: auto; font-size: 9.5px; color: #bbb; font-style: italic; }
+
+    /* ── bottom columns ── */
+    .cols {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1.05fr 0.95fr;
+      height: calc(800px - 44px - 50px - 178px);
+    }
+
+    .col {
+      padding: 13px 18px;
+      border-right: 1px solid #eee;
+      overflow: hidden;
+    }
+    .col:last-child { border-right: none; }
+    .col-label {
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: #bbb;
+      margin-bottom: 10px;
+      padding-bottom: 7px;
+      border-bottom: 1px solid #eee;
+    }
+
+    /* research col */
+    .r { margin-bottom: 8px; font-size: 11.5px; }
+    .r:last-child { margin-bottom: 0; }
+    .r b { font-weight: 600; display: block; margin-bottom: 1px; font-size: 11px; }
+    .r span { color: #555; line-height: 1.45; display: block; }
+
+    /* decisions col */
+    .d { display: flex; gap: 9px; margin-bottom: 7px; font-size: 11.5px; align-items: baseline; }
+    .d:last-child { margin-bottom: 0; }
+    .dk {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      color: #999;
+      flex-shrink: 0;
+      min-width: 60px;
+      padding-top: 1.5px;
+    }
+    .dv { color: #222; line-height: 1.4; }
+
+    /* outcome col */
+    .mblock { display: flex; align-items: baseline; gap: 9px; margin-bottom: 7px; }
+    .mv {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      font-weight: 500;
+      color: #111;
+      flex-shrink: 0;
+      min-width: 64px;
+      letter-spacing: -0.5px;
+    }
+    .ml { font-size: 11px; color: #555; }
+    .mn { font-size: 9.5px; color: #aaa; display: block; margin-top: 1px; }
+
+    hr { border: none; border-top: 1px solid #eee; margin: 10px 0; }
+
+    .lesson { font-size: 11px; color: #444; margin-bottom: 6px; line-height: 1.45; }
+    .lesson b { font-weight: 600; color: #111; }
+  </style>
+</head>
+<body>
+
+<!-- header -->
+<header>
+  <span class="h-title">SentinelX</span>
+  <span class="h-sep">—</span>
+  <span class="h-sub">predictive maintenance &amp; anomaly detection · building a system operators would actually trust</span>
+  <span class="h-sp"></span>
+  <span class="h-stack">Python · XGBoost · PyTorch · SHAP · FastAPI · PostgreSQL · Docker · GitHub Actions · Ollama/Llama 3.2</span>
+</header>
+
+<!-- insight strip -->
+<div class="insight">
+  <span class="hook">Core research finding:</span>
+  <span class="body">The dominant failure mode in industrial monitoring is not model inaccuracy — it is <strong>operator distrust from alert fatigue</strong> (industry FP rate ~54%, Paper 3). This reframed the engineering priorities entirely.</span>
+  <div class="pills">
+    <span class="pill">PR-AUC &gt; ROC-AUC</span>
+    <span class="pill">SMOTE inside CV only</span>
+    <span class="pill">hybrid detection</span>
+    <span class="pill">streaming quality gates</span>
+  </div>
+</div>
+
+<!-- workflow -->
+<div class="workflow">
+  <div class="sec-label">System Workflow</div>
+
+  <div class="pipeline">
+
+    <div class="node" style="width:86px; height:52px;">
+      <div class="nt">Sensor Stream</div>
+      <div class="ns">19 raw inputs<br>temp · vib · cpu<br>disk · network</div>
+    </div>
+
+    <span class="arr">→</span>
+
+    <div class="node" style="width:94px; height:52px;">
+      <div class="nt">Quality Gates</div>
+      <div class="ns">schema + range<br>validation before<br>pipeline entry</div>
+    </div>
+
+    <span class="arr">→</span>
+
+    <div class="node" style="width:104px; height:52px;">
+      <div class="nt">Feature Eng.</div>
+      <div class="ns">124 features<br>lag · rolling · derived<br>cross-domain</div>
+    </div>
+
+    <span class="arr">→</span>
+
+    <div class="node-pair">
+      <div class="node" style="width:138px; height:32px;">
+        <div class="nt" style="font-size:10.5px;">XGBoost classifier</div>
+        <div class="ns" style="margin-top:1px;">supervised · PR-AUC · early stopping</div>
+      </div>
+      <div class="node" style="width:138px; height:32px;">
+        <div class="nt" style="font-size:10.5px;">Autoencoder (AE)</div>
+        <div class="ns" style="margin-top:1px;">unsupervised · reconstruction error</div>
+      </div>
+    </div>
+
+    <span class="arr">→</span>
+
+    <div class="node" style="width:90px; height:52px;">
+      <div class="nt">SHAP</div>
+      <div class="ns">per-prediction<br>feature weights<br>TreeExplainer</div>
+    </div>
+
+    <span class="arr">→</span>
+
+    <div class="node" style="width:90px; height:52px;">
+      <div class="nt">FastAPI</div>
+      <div class="ns">:8000<br>/predict · /stream<br>/alerts · /fatigue</div>
+    </div>
+
+    <span class="arr">→</span>
+
+    <div class="node-pair">
+      <div class="node" style="width:152px; height:32px;">
+        <div class="nt" style="font-size:10.5px;">PostgreSQL</div>
+        <div class="ns" style="margin-top:1px;">JSONB · sensors + predictions</div>
+      </div>
+      <div class="node" style="width:152px; height:32px;">
+        <div class="nt" style="font-size:10.5px;">Streamlit + Ollama</div>
+        <div class="ns" style="margin-top:1px;">dashboard · LLM diagnostic reports</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="thr-row">
+    <span class="thr-label">threshold modes</span>
+    <span class="thr-mode"><b>ultra_safe</b> — prec 0.90, recall 0.48</span>
+    <span class="thr-dot">·</span>
+    <span class="thr-mode"><b>balanced</b> — prec 0.76, recall 0.83, F1 0.79</span>
+    <span class="thr-dot">·</span>
+    <span class="thr-mode"><b>sensitive</b> — prec 0.61, recall 0.95</span>
+    <span class="thr-note">no single cutoff is correct across all operational contexts</span>
+  </div>
+</div>
+
+<!-- bottom columns -->
+<div class="cols">
+
+  <div class="col">
+    <div class="col-label">Research Influences</div>
+
+    <div class="r">
+      <b>Hybrid detection — Paper 1</b>
+      <span>Supervised + unsupervised signals catch different failure modes. XGBoost for labeled patterns; autoencoder for novelty without labels.</span>
+    </div>
+    <div class="r">
+      <b>PR-AUC &amp; SMOTE discipline — Paper 2</b>
+      <span>ROC-AUC misleads at 96%+ class imbalance. SMOTE applied before CV leaks synthetic minority samples into validation — inflates scores silently.</span>
+    </div>
+    <div class="r">
+      <b>Alert fatigue reframing — Paper 3</b>
+      <span>Industry FP rate ~54% causes operators to stop reading alerts. Reducing FP rate became the primary engineering goal, not accuracy.</span>
+    </div>
+    <div class="r">
+      <b>Streaming quality gates — Paper 4</b>
+      <span>Data quality must be validated before reaching the model. A bad reading produces a confident wrong prediction — and erodes trust further.</span>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="col-label">Engineering Decisions</div>
+
+    <div class="d">
+      <span class="dk">metric</span>
+      <span class="dv">PR-AUC over accuracy — a model predicting "normal" always scores 97% on a 3% failure class</span>
+    </div>
+    <div class="d">
+      <span class="dk">SMOTE</span>
+      <span class="dv">Applied inside each CV fold only — never globally — to prevent validation leakage</span>
+    </div>
+    <div class="d">
+      <span class="dk">threshold</span>
+      <span class="dv">Three configurable modes instead of a fixed cutoff — tradeoff depends on operational cost context</span>
+    </div>
+    <div class="d">
+      <span class="dk">local LLM</span>
+      <span class="dv">Ollama + Llama 3.2 — data privacy, no cloud dependency, deterministic latency, rule-based fallback</span>
+    </div>
+    <div class="d">
+      <span class="dk">JSONB</span>
+      <span class="dv">Flexible sensor payloads per machine type — avoids schema migrations as sensor configs change</span>
+    </div>
+    <div class="d">
+      <span class="dk">CI/CD</span>
+      <span class="dv">GitHub Actions + Docker from day one — reproducible by design, not retrofitted after "it works locally"</span>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="col-label">Outcome</div>
+
+    <div class="mblock">
+      <span class="mv">0.861</span>
+      <div><span class="ml">PR-AUC (test set)</span><span class="mn">5-fold CV: 0.862 ± 0.010</span></div>
+    </div>
+    <div class="mblock">
+      <span class="mv">1.44%</span>
+      <div><span class="ml">false positive rate</span><span class="mn">vs. industry ~54% (Paper 3 benchmark)</span></div>
+    </div>
+    <div class="mblock">
+      <span class="mv">0.792</span>
+      <div><span class="ml">F1, balanced mode</span><span class="mn">precision 0.76 · recall 0.83</span></div>
+    </div>
+    <div class="mblock">
+      <span class="mv">124</span>
+      <div><span class="ml">engineered features</span><span class="mn">from 19 raw sensor inputs</span></div>
+    </div>
+
+    <hr>
+
+    <div class="lesson"><b>The real problem</b> was operator trust, not model accuracy. Explainability and low FP rate mattered more than marginal recall gains.</div>
+    <div class="lesson"><b>Metric choice is a design decision.</b> PR-AUC changed what the model optimized for — not just how it was evaluated.</div>
+    <div class="lesson">Stack is <b>Dockerized, tested, and CI-enabled</b> — pytest + Playwright, GitHub Actions, FastAPI, PostgreSQL, Ollama.</div>
+  </div>
+
+</div>
+
+</body>
+</html>

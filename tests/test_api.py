@@ -1,9 +1,8 @@
 """
 Unit tests for the SentinelX API.
 """
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
-import json
 
 
 class TestAPISchema:
@@ -26,7 +25,7 @@ class TestAPISchema:
             "process_temperature_k",
             "rotational_speed_rpm",
             "torque_nm",
-            "tool_wear_min"
+            "tool_wear_min",
         ]
         for field in required:
             assert field in sensors, f"Missing sensor field: {field}"
@@ -39,7 +38,7 @@ class TestAPISchema:
             "memory_usage_percent",
             "disk_io_bytes_per_sec",
             "error_rate_per_min",
-            "network_latency_ms"
+            "network_latency_ms",
         ]
         for field in required:
             assert field in system, f"Missing system field: {field}"
@@ -79,7 +78,7 @@ class TestDiagnosticResult:
             "network_congestion",
             "software_stress",
             "power_anomaly",
-            "complex_pattern"
+            "complex_pattern",
         ]
         assert len(valid_causes) == 6
 
@@ -107,10 +106,7 @@ class TestFeatureEngineering:
             pytest.skip("Feature names file not found")
 
         rolling_indicators = ["_mean_", "_std_", "_min_", "_max_"]
-        has_rolling = any(
-            any(ind in name for ind in rolling_indicators)
-            for name in feature_names
-        )
+        has_rolling = any(any(ind in name for ind in rolling_indicators) for name in feature_names)
         assert has_rolling, "Rolling window features should be present"
 
     def test_lag_features_present(self, feature_names):
@@ -132,8 +128,7 @@ class TestModelConfig:
 
         # Check for XGBoost params (nested under xgb_params)
         assert "xgb_params" in model_config or any(
-            key in model_config
-            for key in ["n_estimators", "max_depth", "learning_rate"]
+            key in model_config for key in ["n_estimators", "max_depth", "learning_rate"]
         )
 
         # If xgb_params exists, check nested structure

@@ -1,8 +1,8 @@
 """
 Pytest configuration and shared fixtures for SentinelX tests.
 """
+
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -23,7 +23,7 @@ def sample_sensor_data():
             "process_temperature_k": 310.0,
             "rotational_speed_rpm": 1500,
             "torque_nm": 40.0,
-            "tool_wear_min": 100
+            "tool_wear_min": 100,
         },
         "system": {
             "cpu_utilization_percent": 45.0,
@@ -32,18 +32,15 @@ def sample_sensor_data():
             "error_rate_per_min": 0.5,
             "network_latency_ms": 25.0,
             "edge_processing_time_ms": 12.5,
-            "fuzzy_pid_output": 0.4
+            "fuzzy_pid_output": 0.4,
         },
-        "quality": {
-            "type_encoded": 1,
-            "vibration_rms": 0.35
-        },
+        "quality": {"type_encoded": 1, "vibration_rms": 0.35},
         "environment": {
             "ambient_humidity_percent": 45.0,
             "power_supply_voltage": 230.0,
             "coolant_flow_rate_lpm": 2.5,
-            "spindle_load_percent": 55.0
-        }
+            "spindle_load_percent": 55.0,
+        },
     }
 
 
@@ -58,7 +55,7 @@ def high_risk_sensor_data():
             "process_temperature_k": 340.0,  # Very high
             "rotational_speed_rpm": 2800,  # High speed
             "torque_nm": 75.0,  # High torque
-            "tool_wear_min": 220  # High wear
+            "tool_wear_min": 220,  # High wear
         },
         "system": {
             "cpu_utilization_percent": 95.0,  # High CPU
@@ -67,18 +64,15 @@ def high_risk_sensor_data():
             "error_rate_per_min": 8.5,  # High errors
             "network_latency_ms": 150.0,  # High latency
             "edge_processing_time_ms": 75.0,
-            "fuzzy_pid_output": 0.9
+            "fuzzy_pid_output": 0.9,
         },
-        "quality": {
-            "type_encoded": 2,
-            "vibration_rms": 0.85  # High vibration
-        },
+        "quality": {"type_encoded": 2, "vibration_rms": 0.85},  # High vibration
         "environment": {
             "ambient_humidity_percent": 75.0,
             "power_supply_voltage": 215.0,  # Low voltage
             "coolant_flow_rate_lpm": 1.2,  # Low flow
-            "spindle_load_percent": 92.0  # High load
-        }
+            "spindle_load_percent": 92.0,  # High load
+        },
     }
 
 

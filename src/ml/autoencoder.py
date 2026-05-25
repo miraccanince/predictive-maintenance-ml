@@ -37,30 +37,27 @@ Data Leakage Prevention:
 - Scoring: applied to ALL data (healthy + failure) — no leakage
 """
 
+import json
+import logging
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
 from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
-import logging
-import json
-import joblib
-
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import StandardScaler
+from torch.utils.data import DataLoader, TensorDataset
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SentinelX.Autoencoder")
 
 
 # =============================================================================
 # 1. CONFIGURATION
 # =============================================================================
+
 
 @dataclass
 class AutoencoderConfig:
@@ -74,14 +71,22 @@ class AutoencoderConfig:
     target_col: str = "machine_failure"
 
     # --- Columns to exclude (same as train_model.py) ---
-    exclude_cols: list = field(default_factory=lambda: [
-        "timestamp", "machine_id", "product_type",
-        "machine_failure",
-        "failure_TWF", "failure_HDF", "failure_PWF",
-        "failure_OSF", "failure_RNF",
-        "maintenance_status",
-        "anomaly_score", "is_anomaly",
-    ])
+    exclude_cols: list = field(
+        default_factory=lambda: [
+            "timestamp",
+            "machine_id",
+            "product_type",
+            "machine_failure",
+            "failure_TWF",
+            "failure_HDF",
+            "failure_PWF",
+            "failure_OSF",
+            "failure_RNF",
+            "maintenance_status",
+            "anomaly_score",
+            "is_anomaly",
+        ]
+    )
 
     # --- Architecture ---
     # WHY 124 → 64 → 32 → 16 → 32 → 64 → 124?
@@ -104,8 +109,8 @@ class AutoencoderConfig:
     epochs: int = 100
     batch_size: int = 512
     learning_rate: float = 1e-3
-    weight_decay: float = 1e-5      # L2 regularization on weights
-    val_split: float = 0.2           # 20% of healthy data for validation
+    weight_decay: float = 1e-5  # L2 regularization on weights
+    val_split: float = 0.2  # 20% of healthy data for validation
     early_stopping_patience: int = 10  # Stop if val_loss doesn't improve
     random_state: int = 42
 
@@ -138,6 +143,7 @@ class AutoencoderConfig:
 # - Acts as mild regularization (reduces need for dropout)
 # - Paper 4: "BN layers enable deeper networks for real-time processing"
 
+
 class Autoencoder(nn.Module):
     """
     Multi-layer Autoencoder for anomaly detection via reconstruction error.
@@ -155,30 +161,36 @@ class Autoencoder(nn.Module):
         encoder_layers = []
         prev_dim = input_dim
         for dim in config.encoder_dims:
-            encoder_layers.extend([
-                nn.Linear(prev_dim, dim),
-                nn.BatchNorm1d(dim),
-                nn.ReLU(),
-            ])
+            encoder_layers.extend(
+                [
+                    nn.Linear(prev_dim, dim),
+                    nn.BatchNorm1d(dim),
+                    nn.ReLU(),
+                ]
+            )
             prev_dim = dim
         self.encoder = nn.Sequential(*encoder_layers)
 
         # --- Build Decoder ---
         decoder_layers = []
         for dim in config.decoder_dims:
-            decoder_layers.extend([
-                nn.Linear(prev_dim, dim),
-                nn.BatchNorm1d(dim),
-                nn.ReLU(),
-            ])
+            decoder_layers.extend(
+                [
+                    nn.Linear(prev_dim, dim),
+                    nn.BatchNorm1d(dim),
+                    nn.ReLU(),
+                ]
+            )
             prev_dim = dim
         # Final layer: linear activation (reconstruct arbitrary values)
         decoder_layers.append(nn.Linear(prev_dim, input_dim))
         self.decoder = nn.Sequential(*decoder_layers)
 
-        logger.info(f"  Autoencoder architecture: {input_dim} → "
-                    f"{' → '.join(map(str, config.encoder_dims))} → "
-                    f"{' → '.join(map(str, config.decoder_dims))} → {input_dim}")
+        logger.info(
+            f"  Autoencoder architecture: {input_dim} → "
+            f"{' → '.join(map(str, config.encoder_dims))} → "
+            f"{' → '.join(map(str, config.decoder_dims))} → {input_dim}"
+        )
         total_params = sum(p.numel() for p in self.parameters())
         logger.info(f"  Total parameters: {total_params:,}")
 
@@ -211,11 +223,10 @@ class Autoencoder(nn.Module):
 # This is analogous to fitting a normalcy model, then deploying it
 # to score new (potentially anomalous) data — no leakage.
 
+
 def train_autoencoder(
-    X: pd.DataFrame,
-    y: pd.Series,
-    config: AutoencoderConfig
-) -> Tuple[Autoencoder, StandardScaler, dict]:
+    X: pd.DataFrame, y: pd.Series, config: AutoencoderConfig
+) -> tuple[Autoencoder, StandardScaler, dict]:
     """
     Train autoencoder on healthy data only.
 
@@ -247,12 +258,14 @@ def train_autoencoder(
     logger.info(f"  Device: {device}")
 
     # --- Filter healthy data ---
-    healthy_mask = (y == 0)
+    healthy_mask = y == 0
     X_healthy = X[healthy_mask].copy()
     n_healthy = len(X_healthy)
     n_failure = (~healthy_mask).sum()
-    logger.info(f"  Healthy samples for training: {n_healthy:,} "
-                f"(excluded {n_failure:,} failure samples)")
+    logger.info(
+        f"  Healthy samples for training: {n_healthy:,} "
+        f"(excluded {n_failure:,} failure samples)"
+    )
 
     # --- Train/Val split (within healthy data) ---
     np.random.seed(config.random_state)
@@ -298,20 +311,19 @@ def train_autoencoder(
     model = Autoencoder(input_dim, config).to(device)
 
     optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay
+        model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
     criterion = nn.MSELoss()
 
     # --- Training Loop with Early Stopping ---
-    best_val_loss = float('inf')
+    best_val_loss = float("inf")
     patience_counter = 0
     best_state = None
     history = {"train_loss": [], "val_loss": []}
 
-    logger.info(f"  Training: {config.epochs} max epochs, "
-                f"patience={config.early_stopping_patience}")
+    logger.info(
+        f"  Training: {config.epochs} max epochs, " f"patience={config.early_stopping_patience}"
+    )
 
     for epoch in range(config.epochs):
         # --- Train ---
@@ -352,14 +364,18 @@ def train_autoencoder(
             patience_counter += 1
 
         if (epoch + 1) % 10 == 0 or patience_counter == 0:
-            logger.info(f"  Epoch {epoch+1:3d}/{config.epochs}: "
-                        f"train_loss={avg_train_loss:.6f}, "
-                        f"val_loss={avg_val_loss:.6f}"
-                        f"{' *best*' if patience_counter == 0 else ''}")
+            logger.info(
+                f"  Epoch {epoch+1:3d}/{config.epochs}: "
+                f"train_loss={avg_train_loss:.6f}, "
+                f"val_loss={avg_val_loss:.6f}"
+                f"{' *best*' if patience_counter == 0 else ''}"
+            )
 
         if patience_counter >= config.early_stopping_patience:
-            logger.info(f"  Early stopping at epoch {epoch+1} "
-                        f"(no improvement for {config.early_stopping_patience} epochs)")
+            logger.info(
+                f"  Early stopping at epoch {epoch+1} "
+                f"(no improvement for {config.early_stopping_patience} epochs)"
+            )
             break
 
     # --- Restore best model ---
@@ -376,8 +392,10 @@ def train_autoencoder(
         "latent_dim": config.encoder_dims[-1],
     }
 
-    logger.info(f"  Training complete: best_val_loss={best_val_loss:.6f} "
-                f"at epoch {epoch + 1 - patience_counter}")
+    logger.info(
+        f"  Training complete: best_val_loss={best_val_loss:.6f} "
+        f"at epoch {epoch + 1 - patience_counter}"
+    )
 
     return model, scaler, metrics
 
@@ -399,12 +417,13 @@ def train_autoencoder(
 # We score in batches (same batch_size as training) to avoid
 # loading 500K × 124 features × 4 bytes = ~250MB into GPU at once.
 
+
 def compute_anomaly_scores(
     model: Autoencoder,
     scaler: StandardScaler,
     X: pd.DataFrame,
     config: AutoencoderConfig,
-    device: torch.device
+    device: torch.device,
 ) -> np.ndarray:
     """
     Compute per-row reconstruction error (anomaly score) for ALL samples.
@@ -462,7 +481,8 @@ def compute_anomaly_scores(
 # 5. PIPELINE ORCHESTRATOR
 # =============================================================================
 
-def run_autoencoder_pipeline(config: Optional[AutoencoderConfig] = None) -> Path:
+
+def run_autoencoder_pipeline(config: AutoencoderConfig | None = None) -> Path:
     """
     Execute the full autoencoder pipeline: Train → Score → Integrate.
 
@@ -522,13 +542,17 @@ def run_autoencoder_pipeline(config: Optional[AutoencoderConfig] = None) -> Path
     # --- Validate scores ---
     healthy_scores = scores[y == 0]
     failure_scores = scores[y == 1]
-    logger.info(f"  Healthy samples:  mean={healthy_scores.mean():.4f}, "
-                f"std={healthy_scores.std():.4f}")
-    logger.info(f"  Failure samples:  mean={failure_scores.mean():.4f}, "
-                f"std={failure_scores.std():.4f}")
+    logger.info(
+        f"  Healthy samples:  mean={healthy_scores.mean():.4f}, " f"std={healthy_scores.std():.4f}"
+    )
+    logger.info(
+        f"  Failure samples:  mean={failure_scores.mean():.4f}, " f"std={failure_scores.std():.4f}"
+    )
     separation = (failure_scores.mean() - healthy_scores.mean()) / (healthy_scores.std() + 1e-8)
-    logger.info(f"  Separation (Cohen's d): {separation:.2f} "
-                f"({'STRONG' if separation > 1.0 else 'MODERATE' if separation > 0.5 else 'WEAK'})")
+    logger.info(
+        f"  Separation (Cohen's d): {separation:.2f} "
+        f"({'STRONG' if separation > 1.0 else 'MODERATE' if separation > 0.5 else 'WEAK'})"
+    )
 
     # --- Step 5: Integrate into feature matrix ---
     logger.info("\nStep 4/5: Updating Golden Dataset with autoencoder_score")
@@ -543,14 +567,17 @@ def run_autoencoder_pipeline(config: Optional[AutoencoderConfig] = None) -> Path
 
     # Save PyTorch model
     torch_path = output_dir / "autoencoder.pt"
-    torch.save({
-        "model_state_dict": model.state_dict(),
-        "input_dim": metrics["input_dim"],
-        "config": {
-            "encoder_dims": config.encoder_dims,
-            "decoder_dims": config.decoder_dims,
-        }
-    }, torch_path)
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "input_dim": metrics["input_dim"],
+            "config": {
+                "encoder_dims": config.encoder_dims,
+                "decoder_dims": config.decoder_dims,
+            },
+        },
+        torch_path,
+    )
     logger.info(f"  Model: {torch_path} ({torch_path.stat().st_size/1024:.1f} KB)")
 
     # Save scaler
@@ -568,10 +595,12 @@ def run_autoencoder_pipeline(config: Optional[AutoencoderConfig] = None) -> Path
     logger.info("\n" + "=" * 60)
     logger.info("STAGE 3b COMPLETE — Autoencoder Anomaly Score Ready")
     logger.info("=" * 60)
-    logger.info(f"  Architecture: {metrics['input_dim']} → {metrics['latent_dim']} → {metrics['input_dim']}")
+    logger.info(
+        f"  Architecture: {metrics['input_dim']} → {metrics['latent_dim']} → {metrics['input_dim']}"
+    )
     logger.info(f"  Best val_loss: {metrics['best_val_loss']:.6f}")
     logger.info(f"  Score separation (Cohen's d): {separation:.2f}")
-    logger.info(f"  Golden Dataset updated: +1 column (autoencoder_score)")
+    logger.info("  Golden Dataset updated: +1 column (autoencoder_score)")
 
     return updated_path
 

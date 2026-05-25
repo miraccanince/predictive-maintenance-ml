@@ -40,19 +40,27 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 INDUSTRY_FP_RATE = 54.0
 SENTINELX_FP_RATE = 1.44
 
+# Orange / green / teal palette
+C_ORANGE = "#f97316"
+C_GREEN = "#10b981"
+C_TEAL = "#14b8a6"
+C_AMBER = "#f59e0b"
+C_RED = "#ef4444"
+C_SLATE = "#64748b"
+
 RISK_COLORS = {
-    "critical": "#dc2626",
-    "high": "#ea580c",
-    "moderate": "#d97706",
-    "low": "#16a34a",
-    "nominal": "#6b7280",
+    "critical": C_RED,
+    "high": C_ORANGE,
+    "moderate": C_AMBER,
+    "low": C_GREEN,
+    "nominal": C_SLATE,
 }
 
-CHART_LAYOUT = {
+CHART_LAYOUT: dict[str, Any] = {
     "paper_bgcolor": "rgba(0,0,0,0)",
     "plot_bgcolor": "rgba(0,0,0,0)",
     "font": {"family": "Inter, system-ui, sans-serif", "color": "#374151", "size": 12},
-    "margin": {"l": 20, "r": 20, "t": 44, "b": 20},
+    "margin": {"l": 20, "r": 20, "t": 48, "b": 20},
 }
 
 
@@ -87,17 +95,20 @@ def get_db_engine():
 def query_alerts(engine, days: int = 7) -> pd.DataFrame:
     if engine is None:
         return pd.DataFrame()
-    query = text("""
-        SELECT id, machine_id, timestamp, failure_prob,
-               risk_level, root_cause, confidence,
-               acknowledged, false_positive, created_at
-        FROM alerts
-        WHERE created_at >= NOW() - INTERVAL ':days days'
-        ORDER BY created_at DESC
-    """)
     try:
         with engine.connect() as conn:
-            return pd.read_sql(query, conn, params={"days": days})
+            return pd.read_sql(
+                text("""
+                    SELECT id, machine_id, timestamp, failure_prob,
+                           risk_level, root_cause, confidence,
+                           acknowledged, false_positive, created_at
+                    FROM alerts
+                    WHERE created_at >= NOW() - INTERVAL ':days days'
+                    ORDER BY created_at DESC
+                """),
+                conn,
+                params={"days": days},
+            )
     except Exception:
         return pd.DataFrame()
 
@@ -110,7 +121,7 @@ def get_alert_counts(engine) -> dict[str, int]:
             total = conn.execute(text("SELECT COUNT(*) FROM alerts")).scalar() or 0
             high_risk = (
                 conn.execute(
-                    text("SELECT COUNT(*) FROM alerts WHERE risk_level IN ('high', 'critical')")
+                    text("SELECT COUNT(*) FROM alerts" " WHERE risk_level IN ('high', 'critical')")
                 ).scalar()
                 or 0
             )
@@ -193,10 +204,10 @@ def chart_fp_comparison() -> go.Figure:
         go.Bar(
             x=["Industry average", "SentinelX"],
             y=[INDUSTRY_FP_RATE, SENTINELX_FP_RATE],
-            marker_color=["#fca5a5", "#2563eb"],
+            marker_color=["#fcd34d", C_GREEN],
             text=[f"{INDUSTRY_FP_RATE:.0f}%", f"{SENTINELX_FP_RATE:.1f}%"],
             textposition="outside",
-            textfont={"size": 22, "color": "#111827", "family": "Inter, sans-serif"},
+            textfont={"size": 22, "color": "#111827"},
             width=[0.45, 0.45],
         )
     )
@@ -237,7 +248,7 @@ def chart_root_cause(df: pd.DataFrame) -> go.Figure:
     else:
         df["label"] = df["root_cause"].str.replace("_", " ").str.title()
 
-    colors = ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#d97706"]
+    colors = [C_ORANGE, C_TEAL, C_GREEN, C_AMBER, C_SLATE]
     fig = go.Figure(
         go.Pie(
             labels=df["label"],
@@ -297,17 +308,14 @@ def chart_timeline(df: pd.DataFrame) -> go.Figure:
                 "avg_probability": np.random.uniform(0.08, 0.35, 24),
             }
         )
-    fig = make_subplots(
-        specs=[[{"secondary_y": True}]],
-        subplot_titles=[""],
-    )
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(
         go.Bar(
             x=df["hour"],
             y=df["alert_count"],
             name="Number of alerts",
-            marker_color="#bfdbfe",
-            marker_line_color="#2563eb",
+            marker_color="#fed7aa",
+            marker_line_color=C_ORANGE,
             marker_line_width=1,
         ),
         secondary_y=False,
@@ -317,14 +325,17 @@ def chart_timeline(df: pd.DataFrame) -> go.Figure:
             x=df["hour"],
             y=df["avg_probability"],
             name="Average failure probability",
-            line={"color": "#dc2626", "width": 2},
+            line={"color": C_TEAL, "width": 2},
             mode="lines+markers",
             marker={"size": 4},
         ),
         secondary_y=True,
     )
     fig.update_layout(
-        title={"text": "Alert activity — last 24 hours", "font": {"size": 13, "color": "#374151"}},
+        title={
+            "text": "Alert activity — last 24 hours",
+            "font": {"size": 13, "color": "#374151"},
+        },
         height=280,
         legend={
             "orientation": "h",
@@ -349,16 +360,16 @@ def chart_timeline(df: pd.DataFrame) -> go.Figure:
 # =============================================================================
 
 
-def kpi_card(title: str, value: str, subtitle: str, color: str = "#2563eb") -> str:
+def kpi_card(title: str, value: str, subtitle: str, color: str = C_ORANGE) -> str:
     return f"""
     <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
-                padding:1.2rem 1.4rem;border-top:3px solid {color}">
-        <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.06em;
-                    text-transform:uppercase;color:#9ca3af;margin-bottom:0.4rem">
+                padding:1.2rem 1.4rem;border-top:3px solid {color};height:100%">
+        <div style="font-size:0.71rem;font-weight:600;letter-spacing:0.07em;
+                    text-transform:uppercase;color:#9ca3af;margin-bottom:0.45rem">
             {title}
         </div>
-        <div style="font-size:1.9rem;font-weight:700;color:#111827;line-height:1.1;
-                    margin-bottom:0.35rem">
+        <div style="font-size:1.85rem;font-weight:700;color:#111827;
+                    line-height:1.1;margin-bottom:0.35rem">
             {value}
         </div>
         <div style="font-size:0.78rem;color:#6b7280">{subtitle}</div>
@@ -367,17 +378,17 @@ def kpi_card(title: str, value: str, subtitle: str, color: str = "#2563eb") -> s
 
 
 def section_header(title: str, description: str = "") -> None:
-    desc_html = (
-        f'<div style="font-size:0.85rem;color:#6b7280;margin-top:0.2rem">{description}</div>'
+    desc = (
+        f'<div style="font-size:0.84rem;color:#6b7280;margin-top:0.2rem">{description}</div>'
         if description
         else ""
     )
     st.markdown(
         f"""
-        <div style="margin:2rem 0 1rem 0;padding-bottom:0.75rem;
-                    border-bottom:2px solid #e5e7eb">
-            <div style="font-size:1.05rem;font-weight:600;color:#111827">{title}</div>
-            {desc_html}
+        <div style="margin:2.2rem 0 1rem 0;padding-bottom:0.7rem;
+                    border-bottom:2px solid #f3f4f6">
+            <div style="font-size:1rem;font-weight:600;color:#111827">{title}</div>
+            {desc}
         </div>
         """,
         unsafe_allow_html=True,
@@ -399,45 +410,37 @@ def main():
     st.markdown(
         """
         <style>
-        /* Base layout */
         .block-container { padding-top: 1.5rem !important; max-width: 1200px; }
 
-        /* Sidebar */
-        [data-testid="stSidebar"] { background-color: #1e293b !important; }
+        /* ── Sidebar (dark slate) ──────────────────────────────────────── */
+        [data-testid="stSidebar"] { background-color: #0f172a !important; }
         [data-testid="stSidebar"] .stMarkdown p,
         [data-testid="stSidebar"] .stMarkdown span,
         [data-testid="stSidebar"] .stMarkdown div,
-        [data-testid="stSidebar"] label,
-        [data-testid="stSidebar"] .stSelectbox label {
-            color: #cbd5e1 !important;
-        }
+        [data-testid="stSidebar"] .stMarkdown li,
+        [data-testid="stSidebar"] label { color: #94a3b8 !important; }
         [data-testid="stSidebar"] h1,
         [data-testid="stSidebar"] h2,
-        [data-testid="stSidebar"] h3 {
+        [data-testid="stSidebar"] h3 { color: #f8fafc !important; }
+        [data-testid="stSidebar"] hr { border-color: #1e293b !important; }
+        [data-testid="stSidebar"] [data-baseweb="select"] > div {
+            background-color: #1e293b !important;
             color: #f1f5f9 !important;
-        }
-        [data-testid="stSidebar"] hr { border-color: #334155 !important; }
-        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
-            background-color: #334155 !important;
-            color: #f1f5f9 !important;
-            border-color: #475569 !important;
+            border-color: #334155 !important;
         }
 
-        /* Main content — force light theme text */
-        [data-testid="stMain"] { background-color: #f9fafb !important; }
-        [data-testid="stMain"] p,
-        [data-testid="stMain"] span,
-        [data-testid="stMain"] label,
+        /* ── Main content (white) ─────────────────────────────────────── */
+        [data-testid="stMain"] { background-color: #ffffff !important; }
         [data-testid="stMarkdownContainer"] p,
-        [data-testid="stMarkdownContainer"] li { color: #374151 !important; }
+        [data-testid="stMarkdownContainer"] li,
+        [data-testid="stMarkdownContainer"] span { color: #374151 !important; }
         [data-testid="stMain"] h1,
         [data-testid="stMain"] h2,
-        [data-testid="stMain"] h3,
-        [data-testid="stMain"] h4 { color: #111827 !important; }
+        [data-testid="stMain"] h3 { color: #111827 !important; }
 
-        /* Expander */
+        /* ── Expander ─────────────────────────────────────────────────── */
         [data-testid="stExpander"] {
-            background: #ffffff !important;
+            background: #fafafa !important;
             border: 1px solid #e5e7eb !important;
             border-radius: 8px !important;
         }
@@ -446,18 +449,17 @@ def main():
         [data-testid="stExpander"] label,
         [data-testid="stExpander"] span { color: #374151 !important; }
 
-        /* Buttons */
+        /* ── Buttons ──────────────────────────────────────────────────── */
         .stButton > button {
-            background-color: #2563eb !important;
+            background-color: #f97316 !important;
             color: #ffffff !important;
             border: none !important;
             border-radius: 6px !important;
             font-weight: 500 !important;
-            padding: 0.4rem 1rem !important;
         }
-        .stButton > button:hover { background-color: #1d4ed8 !important; }
+        .stButton > button:hover { background-color: #ea6c00 !important; }
 
-        /* Form inputs */
+        /* ── Form inputs ──────────────────────────────────────────────── */
         input[type="text"], input[type="number"],
         [data-baseweb="input"] input {
             background-color: #ffffff !important;
@@ -466,17 +468,16 @@ def main():
             border-radius: 6px !important;
         }
         [data-testid="stSlider"] label,
-        [data-testid="stTextInput"] label,
-        [data-testid="stNumberInput"] label { color: #374151 !important; }
+        [data-testid="stTextInput"] label { color: #374151 !important; }
 
-        /* Dataframe */
-        [data-testid="stDataFrame"] { border: 1px solid #e5e7eb; border-radius: 8px; }
+        /* ── Dataframe ────────────────────────────────────────────────── */
+        [data-testid="stDataFrame"] {
+            border: 1px solid #e5e7eb !important;
+            border-radius: 8px !important;
+        }
 
-        /* Alert boxes */
+        /* ── Alert boxes ──────────────────────────────────────────────── */
         [data-testid="stAlert"] p { color: #374151 !important; }
-
-        /* Info box */
-        [data-testid="stInfo"] { background-color: #eff6ff !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -515,7 +516,7 @@ def main():
 
         st.markdown(
             f"""
-            <div style="font-size:0.85rem;line-height:2.2">
+            <div style="font-size:0.85rem;line-height:2.4">
                 <span style="color:{'#4ade80' if api_ok else '#f87171'}">&#9679;</span>
                 &nbsp;API server &nbsp;
                 <span style="color:{'#4ade80' if api_ok else '#f87171'};font-weight:600">
@@ -532,33 +533,39 @@ def main():
         )
 
         if cv:
+            balanced = ev.get("thresholds", {}).get("balanced", {}) if ev else {}
             st.markdown("---")
             st.markdown("**Trained model**")
-            balanced = ev.get("thresholds", {}).get("balanced", {}) if ev else {}
             st.markdown(
                 f"""
-                <div style="font-size:0.82rem;line-height:2.1;color:#94a3b8">
-                    Algorithm &nbsp;
-                    <span style="color:#f1f5f9;font-weight:500">XGBoost + SMOTE</span><br>
-                    Features &nbsp;
-                    <span style="color:#f1f5f9;font-weight:500">124 engineered</span><br>
-                    Cross-validation &nbsp;
-                    <span style="color:#f1f5f9;font-weight:500">5-fold stratified</span><br>
-                    PR-AUC &nbsp;
-                    <span style="color:#f1f5f9;font-weight:500">
+                <div style="font-size:0.82rem;line-height:2.2;color:#64748b">
+                    Algorithm
+                    <span style="color:#f1f5f9;font-weight:500;float:right">
+                        XGBoost + SMOTE
+                    </span><br>
+                    Features
+                    <span style="color:#f1f5f9;font-weight:500;float:right">
+                        124 engineered
+                    </span><br>
+                    Cross-validation
+                    <span style="color:#f1f5f9;font-weight:500;float:right">
+                        5-fold stratified
+                    </span><br>
+                    PR-AUC
+                    <span style="color:#f97316;font-weight:600;float:right">
                         {cv.get('pr_auc_mean', 0):.3f}
                         ± {cv.get('pr_auc_std', 0):.3f}
                     </span><br>
-                    Recall &nbsp;
-                    <span style="color:#f1f5f9;font-weight:500">
+                    Recall
+                    <span style="color:#10b981;font-weight:600;float:right">
                         {cv.get('recall_mean', 0):.1%}
                     </span><br>
-                    Precision &nbsp;
-                    <span style="color:#f1f5f9;font-weight:500">
+                    Precision
+                    <span style="color:#14b8a6;font-weight:600;float:right">
                         {cv.get('precision_mean', 0):.1%}
                     </span><br>
-                    Decision threshold &nbsp;
-                    <span style="color:#f1f5f9;font-weight:500">
+                    Decision threshold
+                    <span style="color:#f1f5f9;font-weight:500;float:right">
                         {balanced.get('threshold', 0.633):.3f}
                     </span>
                 </div>
@@ -566,7 +573,7 @@ def main():
                 unsafe_allow_html=True,
             )
 
-    # ── Runtime metrics ───────────────────────────────────────────────────────
+    # ── Runtime data ──────────────────────────────────────────────────────────
     days_map = {"Last 24 hours": 1, "Last 7 days": 7, "Last 30 days": 30}
     days = days_map.get(time_range, 7)
     alerts_df = query_alerts(engine, days=days)
@@ -584,20 +591,23 @@ def main():
     ack_rate = (
         alerts_df["acknowledged"].sum() / len(alerts_df) * 100
         if not alerts_df.empty and "acknowledged" in alerts_df.columns
-        else 0
+        else 0.0
     )
 
     # ── Page header ───────────────────────────────────────────────────────────
     st.markdown(
         """
-        <div style="display:flex;align-items:baseline;gap:1rem;margin-bottom:0.25rem">
-            <h1 style="font-size:1.6rem;font-weight:700;color:#111827;margin:0">
+        <div style="display:flex;align-items:baseline;gap:0.85rem;margin-bottom:0.2rem">
+            <h1 style="font-size:1.55rem;font-weight:700;color:#111827;margin:0">
                 SentinelX
             </h1>
-            <span style="font-size:1rem;color:#6b7280">Predictive Maintenance Dashboard</span>
+            <span style="font-size:0.95rem;color:#9ca3af">
+                Predictive Maintenance Dashboard
+            </span>
         </div>
-        <div style="font-size:0.82rem;color:#9ca3af;margin-bottom:1.5rem">
-            Dual-domain telemetry &nbsp;·&nbsp; XGBoost + SHAP explainability &nbsp;·&nbsp;
+        <div style="font-size:0.8rem;color:#d1d5db;margin-bottom:1.8rem">
+            Dual-domain telemetry &nbsp;·&nbsp;
+            XGBoost + SHAP explainability &nbsp;·&nbsp;
             PostgreSQL alert persistence
         </div>
         """,
@@ -607,9 +617,8 @@ def main():
     # ── KPI cards ─────────────────────────────────────────────────────────────
     section_header(
         "Performance overview",
-        "Key indicators from the trained model and live alert database.",
+        "Key metrics from the trained model and the live alert database.",
     )
-
     k1, k2, k3, k4, k5 = st.columns(5)
     pr_auc = cv.get("pr_auc_mean", 0.862) if cv else 0.862
     recall = cv.get("recall_mean", 0.882) if cv else 0.882
@@ -619,8 +628,8 @@ def main():
             kpi_card(
                 "False positive rate",
                 f"{observed_fp_rate:.1f}%",
-                f"Industry average: {INDUSTRY_FP_RATE:.0f}%",
-                "#16a34a",
+                f"vs {INDUSTRY_FP_RATE:.0f}% industry average",
+                C_GREEN,
             ),
             unsafe_allow_html=True,
         )
@@ -630,7 +639,7 @@ def main():
                 "Detection recall",
                 f"{recall:.1%}",
                 "Failures correctly identified",
-                "#2563eb",
+                C_ORANGE,
             ),
             unsafe_allow_html=True,
         )
@@ -640,7 +649,7 @@ def main():
                 "PR-AUC score",
                 f"{pr_auc:.3f}",
                 "Primary metric for imbalanced data",
-                "#7c3aed",
+                C_TEAL,
             ),
             unsafe_allow_html=True,
         )
@@ -650,7 +659,7 @@ def main():
                 f"Alerts — {time_range.lower()}",
                 f"{counts['total']:,}",
                 f"{counts['high_risk']} high or critical severity",
-                "#ea580c" if counts["high_risk"] > 0 else "#6b7280",
+                C_ORANGE if counts["high_risk"] > 0 else C_SLATE,
             ),
             unsafe_allow_html=True,
         )
@@ -660,39 +669,38 @@ def main():
                 "Acknowledgment rate",
                 f"{ack_rate:.0f}%",
                 f"{counts['acknowledged']} alerts reviewed",
-                "#0891b2",
+                C_TEAL,
             ),
             unsafe_allow_html=True,
         )
 
-    # ── Alert analysis charts ─────────────────────────────────────────────────
+    # ── Alert analysis ────────────────────────────────────────────────────────
     section_header(
         "Alert analysis",
         "False positive comparison vs industry, failure root cause breakdown, "
         "and alert severity distribution.",
     )
-
     ca, cb, cc = st.columns(3)
     with ca:
         st.plotly_chart(chart_fp_comparison(), use_container_width=True)
     with cb:
-        root_df = get_root_cause_distribution(engine)
-        st.plotly_chart(chart_root_cause(root_df), use_container_width=True)
+        st.plotly_chart(
+            chart_root_cause(get_root_cause_distribution(engine)), use_container_width=True
+        )
     with cc:
-        risk_df = get_risk_level_distribution(engine)
-        st.plotly_chart(chart_risk_distribution(risk_df), use_container_width=True)
+        st.plotly_chart(
+            chart_risk_distribution(get_risk_level_distribution(engine)), use_container_width=True
+        )
 
-    # ── Timeline ──────────────────────────────────────────────────────────────
+    # ── 24h timeline ─────────────────────────────────────────────────────────
     section_header("24-hour activity")
-    hourly_df = get_hourly_alerts(engine)
-    st.plotly_chart(chart_timeline(hourly_df), use_container_width=True)
+    st.plotly_chart(chart_timeline(get_hourly_alerts(engine)), use_container_width=True)
 
     # ── Recent alerts table ───────────────────────────────────────────────────
     section_header(
         "Recent high-risk alerts",
         "High and critical severity alerts from the selected time window.",
     )
-
     if not alerts_df.empty:
         high_risk_df = alerts_df[alerts_df["risk_level"].isin(["high", "critical"])].head(10)
         if not high_risk_df.empty:
@@ -720,10 +728,7 @@ def main():
             )
             st.dataframe(display, use_container_width=True, hide_index=True)
         else:
-            st.info(
-                "No high or critical severity alerts in the selected time window. "
-                "The system is operating normally."
-            )
+            st.info("No high or critical severity alerts in the selected time window.")
     else:
         st.info(
             "No alert data in the database yet. "
@@ -731,10 +736,13 @@ def main():
         )
 
     # ── Live prediction ───────────────────────────────────────────────────────
+    # NOTE: prediction result is rendered OUTSIDE the expander to avoid
+    # Streamlit's "nested expanders" restriction. Session state carries
+    # the result across the rerun triggered by button press.
     section_header(
         "Live prediction",
-        "Submit sensor and application metrics to the API and receive "
-        "a real-time failure probability with SHAP-based root cause diagnosis.",
+        "Submit sensor and application metrics to receive a real-time failure "
+        "probability with SHAP-based root cause diagnosis.",
     )
 
     with st.expander("Open prediction form"):
@@ -785,25 +793,24 @@ def main():
                 st.session_state[k] = v
 
         st.markdown(
-            "<div style='font-size:0.85rem;color:#6b7280;margin-bottom:0.5rem'>"
-            "Load a preset scenario or adjust values manually below.</div>",
+            "<div style='font-size:0.84rem;color:#6b7280;margin-bottom:0.6rem'>"
+            "Load a preset scenario or adjust values manually.</div>",
             unsafe_allow_html=True,
         )
-
         sc1, sc2, sc3 = st.columns(3)
         for col, name in zip([sc1, sc2, sc3], scenarios):
             with col:
-                if st.button(name, key=f"btn_{name}"):
+                if st.button(name, key=f"preset_{name}"):
                     for k, v in scenarios[name].items():
                         st.session_state[k] = v
                     st.rerun()
 
-        st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:0.8rem'></div>", unsafe_allow_html=True)
         fc1, fc2 = st.columns(2)
 
         with fc1:
             st.markdown(
-                "<div style='font-weight:600;color:#374151;margin-bottom:0.5rem'>"
+                "<div style='font-weight:600;color:#374151;margin-bottom:0.4rem'>"
                 "Hardware / sensor metrics</div>",
                 unsafe_allow_html=True,
             )
@@ -816,7 +823,7 @@ def main():
 
         with fc2:
             st.markdown(
-                "<div style='font-weight:600;color:#374151;margin-bottom:0.5rem'>"
+                "<div style='font-weight:600;color:#374151;margin-bottom:0.4rem'>"
                 "Application / software metrics</div>",
                 unsafe_allow_html=True,
             )
@@ -827,7 +834,7 @@ def main():
             queue_depth = st.slider("Request queue depth", 0, 500, key="queue_depth")
             api_latency = st.slider("API response latency (ms)", 50.0, 1000.0, key="api_latency")
 
-        st.markdown("<div style='margin-top:0.5rem'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:0.4rem'></div>", unsafe_allow_html=True)
         if st.button("Run prediction", type="primary"):
             payload = {
                 "system": {
@@ -858,65 +865,79 @@ def main():
             try:
                 resp = requests.post(f"{API_URL}/predict", json=payload, timeout=30)
                 if resp.status_code == 200:
-                    result = resp.json()
-                    risk = result["risk_level"].upper()
-                    prob = result["failure_probability"]
-                    cause = (result.get("root_cause") or "Unknown").replace("_", " ").title()
-                    alert_id = result.get("alert_id", "—")
-                    color = {
-                        "CRITICAL": "#dc2626",
-                        "HIGH": "#ea580c",
-                        "MODERATE": "#d97706",
-                        "LOW": "#16a34a",
-                        "NOMINAL": "#6b7280",
-                    }.get(risk, "#6b7280")
-                    st.markdown(
-                        f"""
-                        <div style="background:#f9fafb;border:1px solid #e5e7eb;
-                                    border-left:4px solid {color};border-radius:8px;
-                                    padding:1.2rem 1.4rem;margin-top:1rem">
-                            <div style="display:flex;align-items:center;
-                                        gap:12px;margin-bottom:0.8rem">
-                                <span style="background:{color};color:#fff;
-                                             padding:3px 10px;border-radius:4px;
-                                             font-weight:700;font-size:0.85rem;
-                                             letter-spacing:0.05em">
-                                    {risk}
-                                </span>
-                                <span style="font-size:1.05rem;font-weight:600;
-                                             color:#111827">
-                                    {prob:.1%} failure probability
-                                </span>
-                                <span style="margin-left:auto;font-size:0.78rem;
-                                             color:#9ca3af">
-                                    Alert #{alert_id} saved to database
-                                </span>
-                            </div>
-                            <div style="color:#374151;font-size:0.9rem">
-                                Diagnosed root cause: <strong>{cause}</strong>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                    with st.expander("Full SHAP diagnostic report"):
-                        st.markdown(result.get("markdown_report", "No report available."))
+                    # Store result in session state — rendered OUTSIDE this expander
+                    st.session_state["last_prediction"] = resp.json()
+                    st.session_state["prediction_error"] = None
                 else:
-                    st.error(f"API error {resp.status_code}: {resp.text[:300]}")
-            except Exception as e:
-                st.error(
-                    f"Could not reach API at {API_URL}. "
-                    f"Make sure the API container is running. ({e})"
+                    st.session_state["last_prediction"] = None
+                    st.session_state["prediction_error"] = (
+                        f"API returned {resp.status_code}: {resp.text[:300]}"
+                    )
+            except requests.exceptions.ConnectionError:
+                st.session_state["last_prediction"] = None
+                st.session_state["prediction_error"] = (
+                    f"Could not connect to the API at {API_URL}. "
+                    "Make sure the API container is running."
                 )
+            except Exception as e:
+                st.session_state["last_prediction"] = None
+                st.session_state["prediction_error"] = str(e)
+
+    # Prediction result rendered here — OUTSIDE the expander (no nesting issue)
+    if st.session_state.get("prediction_error"):
+        st.error(st.session_state["prediction_error"])
+
+    result = st.session_state.get("last_prediction")
+    if result:
+        risk = result["risk_level"].upper()
+        prob = result["failure_probability"]
+        cause = (result.get("root_cause") or "Unknown").replace("_", " ").title()
+        alert_id = result.get("alert_id", "—")
+        color = {
+            "CRITICAL": C_RED,
+            "HIGH": C_ORANGE,
+            "MODERATE": C_AMBER,
+            "LOW": C_GREEN,
+            "NOMINAL": C_SLATE,
+        }.get(risk, C_SLATE)
+
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e5e7eb;
+                        border-left:4px solid {color};border-radius:8px;
+                        padding:1.2rem 1.5rem;margin-top:0.8rem">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:0.7rem">
+                    <span style="background:{color};color:#fff;padding:3px 12px;
+                                 border-radius:4px;font-weight:700;
+                                 font-size:0.85rem;letter-spacing:0.05em">
+                        {risk}
+                    </span>
+                    <span style="font-size:1.1rem;font-weight:600;color:#111827">
+                        {prob:.1%} failure probability
+                    </span>
+                    <span style="margin-left:auto;font-size:0.78rem;color:#9ca3af">
+                        Alert #{alert_id} saved to database
+                    </span>
+                </div>
+                <div style="color:#374151;font-size:0.9rem">
+                    Diagnosed root cause: <strong>{cause}</strong>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        with st.expander("Full SHAP diagnostic report"):
+            st.markdown(result.get("markdown_report", "No report available."))
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(
         """
-        <div style="margin-top:3rem;padding-top:1rem;border-top:1px solid #e5e7eb;
-                    text-align:center;color:#9ca3af;font-size:0.78rem">
+        <div style="margin-top:3rem;padding-top:1rem;border-top:1px solid #f3f4f6;
+                    text-align:center;color:#d1d5db;font-size:0.78rem">
             SentinelX v1.0 &nbsp;·&nbsp; XGBoost + SMOTE + SHAP &nbsp;·&nbsp;
-            PR-AUC 0.862 &nbsp;·&nbsp; 1.4% false positive rate
-            &nbsp;·&nbsp; FastAPI + PostgreSQL
+            PR-AUC 0.862 &nbsp;·&nbsp; 1.4% false positive rate &nbsp;·&nbsp;
+            FastAPI + PostgreSQL
         </div>
         """,
         unsafe_allow_html=True,

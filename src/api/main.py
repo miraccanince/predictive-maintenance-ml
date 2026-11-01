@@ -417,9 +417,9 @@ async def lifespan(app: FastAPI):
 # =============================================================================
 
 app = FastAPI(
-    title="SentinelX Predictive Maintenance API",
+    title="Predictive Maintenance System API",
     description="""
-## SentinelX: Production-Grade AIOps Platform
+## Predictive Maintenance System: Production-Grade AIOps Platform
 
 Real-time predictive maintenance using XGBoost + SHAP explainability.
 
@@ -580,14 +580,9 @@ async def root():
     banner = """
     ╔═══════════════════════════════════════════════════════════╗
     ║                                                           ║
-    ║   ███████╗███████╗███╗   ██╗████████╗██╗███╗   ██╗███████╗██╗     ██╗  ██╗   ║
-    ║   ██╔════╝██╔════╝████╗  ██║╚══██╔══╝██║████╗  ██║██╔════╝██║     ╚██╗██╔╝   ║
-    ║   ███████╗█████╗  ██╔██╗ ██║   ██║   ██║██╔██╗ ██║█████╗  ██║      ╚███╔╝    ║
-    ║   ╚════██║██╔══╝  ██║╚██╗██║   ██║   ██║██║╚██╗██║██╔══╝  ██║      ██╔██╗    ║
-    ║   ███████║███████╗██║ ╚████║   ██║   ██║██║ ╚████║███████╗███████╗██╔╝ ██╗   ║
-    ║   ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝   ║
+    ║              PREDICTIVE MAINTENANCE SYSTEM                ║
     ║                                                           ║
-    ║           Predictive Maintenance API v1.0                 ║
+    ║                       API v1.0                            ║
     ║                                                           ║
     ║   Endpoints:                                              ║
     ║     POST /predict     - Get failure prediction            ║

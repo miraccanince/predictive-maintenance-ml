@@ -1,5 +1,5 @@
 """
-SentinelX Predictive Maintenance Dashboard
+Predictive Maintenance System Dashboard
 ===========================================
 Real-time alert monitoring and model performance visualization.
 
@@ -202,7 +202,7 @@ def chart_fp_comparison() -> go.Figure:
     reduction = ((INDUSTRY_FP_RATE - SENTINELX_FP_RATE) / INDUSTRY_FP_RATE) * 100
     fig = go.Figure(
         go.Bar(
-            x=["Industry average", "SentinelX"],
+            x=["Industry average", "This system"],
             y=[INDUSTRY_FP_RATE, SENTINELX_FP_RATE],
             marker_color=["#fcd34d", C_GREEN],
             text=[f"{INDUSTRY_FP_RATE:.0f}%", f"{SENTINELX_FP_RATE:.1f}%"],
@@ -402,7 +402,7 @@ def section_header(title: str, description: str = "") -> None:
 
 def main():
     st.set_page_config(
-        page_title="SentinelX — Predictive Maintenance",
+        page_title="Predictive Maintenance System",
         layout="wide",
         initial_sidebar_state="expanded",
     )
@@ -491,8 +491,7 @@ def main():
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown("## SentinelX")
-        st.markdown("Predictive Maintenance Platform")
+        st.markdown("## Predictive Maintenance System")
         st.markdown("---")
 
         st.markdown("**Time window**")
@@ -599,11 +598,8 @@ def main():
         """
         <div style="display:flex;align-items:baseline;gap:0.85rem;margin-bottom:0.2rem">
             <h1 style="font-size:1.55rem;font-weight:700;color:#111827;margin:0">
-                SentinelX
+                Predictive Maintenance System
             </h1>
-            <span style="font-size:0.95rem;color:#9ca3af">
-                Predictive Maintenance Dashboard
-            </span>
         </div>
         <div style="font-size:0.8rem;color:#d1d5db;margin-bottom:1.8rem">
             Dual-domain telemetry &nbsp;·&nbsp;
@@ -935,7 +931,7 @@ def main():
         """
         <div style="margin-top:3rem;padding-top:1rem;border-top:1px solid #f3f4f6;
                     text-align:center;color:#d1d5db;font-size:0.78rem">
-            SentinelX v1.0 &nbsp;·&nbsp; XGBoost + SMOTE + SHAP &nbsp;·&nbsp;
+            Predictive Maintenance System v1.0 &nbsp;·&nbsp; XGBoost + SMOTE + SHAP &nbsp;·&nbsp;
             PR-AUC 0.862 &nbsp;·&nbsp; 1.4% false positive rate &nbsp;·&nbsp;
             FastAPI + PostgreSQL
         </div>

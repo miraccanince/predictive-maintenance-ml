@@ -1,4 +1,4 @@
-# SentinelX: Predictive Maintenance Platform
+# Predictive Maintenance System
 
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://www.docker.com/)
 [![AWS](https://img.shields.io/badge/AWS-ECS%20Ready-FF9900?logo=amazon-aws)](https://aws.amazon.com/ecs/)

@@ -1,7 +1,9 @@
 {
   "target_col": "machine_failure",
+  "holdout_frac": 0.2,
   "n_folds": 5,
   "random_state": 42,
+  "decision_threshold": 0.5,
   "smote_k_neighbors": 5,
   "smote_sampling_strategy": 0.5,
   "xgb_params": {

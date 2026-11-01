@@ -90,26 +90,18 @@ class FeatureStore:
     This fixes the train-serve mismatch by storing historical observations
     and computing rolling mean/std/lag features exactly as done during training.
 
-    For cold-start scenarios (< min_history observations), uses a hybrid approach
-    that synthesizes variance based on how extreme values are from normal ranges.
+    Cold-start handling (< min_history observations) does NOT fabricate
+    values. It uses the exact same convention as training: rolling/lag
+    windows with too little history produce NaN (via pandas'
+    min_periods), which is filled with 0 — identical to how
+    feature_engineer.py's warm-up rows are filled in
+    train_model.py::prepare_X_y. The model was trained on real rows with
+    this exact 0-filled pattern, so this is not an approximation of the
+    training distribution — it IS the training distribution for
+    insufficiently-warmed-up machines. `is_cold_start` reports whether
+    this was the case so callers are never silently given a prediction
+    that looks as reliable as a fully-warmed-up one.
     """
-
-    # Normal operating ranges for key metrics (used for cold-start variance estimation)
-    NORMAL_RANGES = {
-        "air_temperature_K": (295, 315),
-        "process_temperature_K": (305, 325),
-        "torque_Nm": (20, 60),
-        "rotational_speed_rpm": (1200, 1800),
-        "vibration_mm_s": (10, 25),
-        "pressure_psi": (90, 130),
-        "tool_wear_min": (0, 200),
-        "api_response_latency_ms": (50, 200),
-        "error_rate_pct": (0, 5),
-        "cpu_utilization_pct": (30, 80),
-        "memory_utilization_pct": (40, 85),
-        "queue_depth": (0, 50),
-        "disk_io_wait_ms": (5, 20),
-    }
 
     def __init__(self, buffer_size: int = 36, min_history: int = 6):
         """
@@ -118,8 +110,11 @@ class FeatureStore:
         Args:
             buffer_size: Number of observations to keep per machine.
                         Should be >= max(rolling_windows) = 36.
-            min_history: Minimum observations before using real rolling stats.
-                        Below this, synthetic variance is used.
+            min_history: Observations below which a prediction is flagged
+                        `is_cold_start=True` for the caller (features are
+                        still real, just 0-filled per the training
+                        convention — this is a reliability signal, not a
+                        feature-computation branch).
         """
         self.buffer_size = buffer_size
         self.min_history = min_history
@@ -153,98 +148,39 @@ class FeatureStore:
             return pd.DataFrame()
         return pd.DataFrame(history)
 
-    def _estimate_anomaly_std(self, value: float, col: str) -> float:
-        """
-        Estimate standard deviation for cold-start scenarios based on value extremity.
-
-        The model was trained to detect anomalies via high std values in rolling windows.
-        For cold-start (< min_history observations), we synthesize std proportional to
-        how far the value is from normal operating range.
-
-        Made more aggressive to detect single extreme values that would be dangerous.
-        """
-        normal_range = self.NORMAL_RANGES.get(col, (value * 0.8, value * 1.2))
-        low, high = normal_range
-        range_size = high - low
-
-        if low <= value <= high:
-            # Within normal range: small std (stable operation)
-            return abs(value) * 0.02
-        else:
-            # Outside normal range: std proportional to extremity
-            distance_from_range = max(value - high, low - value, 0)
-            # How many "range widths" outside normal?
-            severity = distance_from_range / (range_size + 1e-6)
-
-            # More aggressive scaling for extreme values
-            # severity=1 means 1 range-width outside normal
-            # severity=2 means 2 range-widths outside (very extreme)
-            if severity > 2:
-                # Very extreme: massive std
-                base_std = abs(value) * 0.4
-                extra_std = distance_from_range * 0.3
-            elif severity > 1:
-                # Moderately extreme
-                base_std = abs(value) * 0.25
-                extra_std = distance_from_range * 0.2
-            else:
-                # Slightly outside range
-                base_std = abs(value) * 0.15
-                extra_std = distance_from_range * 0.1
-
-            return base_std + extra_std
-
     def compute_rolling_features(self, df: pd.DataFrame) -> dict[str, float]:
         """
-        Compute rolling mean and std features.
-
-        Uses a hybrid approach:
-        - If history >= min_history: use real rolling statistics (like training)
-        - If history < min_history: synthesize variance based on value extremity
-
-        This handles cold-start scenarios (dashboard single-shot predictions) while
-        still providing proper rolling stats when history accumulates.
+        Compute rolling mean and std features using REAL pandas rolling
+        windows, exactly as training does (feature_engineer.py). With
+        insufficient history, std is NaN (min_periods=2) and is filled
+        with 0 — the same convention train_model.py::prepare_X_y uses
+        for warm-up rows. No fabricated/estimated values.
         """
         features = {}
         rolling_cols = self.config.hardware_rolling_cols + self.config.software_rolling_cols
-        n_observations = len(df)
-        use_synthetic = n_observations < self.min_history
 
         for col in rolling_cols:
             if col not in df.columns:
                 continue
             series = df[col]
-            current_value = series.iloc[-1]
 
             for window in self.config.rolling_windows:  # [6, 12, 36]
-                # Rolling mean (always use real rolling)
                 mean_val = (
                     series.rolling(window=window, min_periods=1, center=False).mean().iloc[-1]
                 )
-                features[f"{col}_mean_{window}"] = mean_val
+                features[f"{col}_mean_{window}"] = mean_val if pd.notna(mean_val) else 0.0
 
-                # Rolling std (hybrid approach)
-                if use_synthetic:
-                    # Cold-start: synthesize std based on value extremity
-                    synthetic_std = self._estimate_anomaly_std(current_value, col)
-                    # Scale by window size (larger windows = more accumulated variance)
-                    features[f"{col}_std_{window}"] = synthetic_std * (1 + window / 36)
-                else:
-                    # Enough history: use real rolling std
-                    std_val = (
-                        series.rolling(window=window, min_periods=2, center=False).std().iloc[-1]
-                    )
-                    features[f"{col}_std_{window}"] = std_val if pd.notna(std_val) else 0.0
+                std_val = series.rolling(window=window, min_periods=2, center=False).std().iloc[-1]
+                features[f"{col}_std_{window}"] = std_val if pd.notna(std_val) else 0.0
 
         return features
 
     def compute_lag_features(self, df: pd.DataFrame) -> dict[str, float]:
         """
-        Compute lag features.
-
-        Uses a hybrid approach for cold-start:
-        - If enough history: use real historical values (like training)
-        - If not enough history: synthesize trend based on value extremity
+        Compute lag features using REAL historical values. With
+        insufficient history, the lag is 0 — the same convention
+        training uses for warm-up rows (no prior observation = no
+        fabricated trend).
         """
         features = {}
         lag_cols = [
@@ -262,54 +198,24 @@ class FeatureStore:
             if col not in df.columns:
                 continue
             series = df[col]
-            current_value = series.iloc[-1]
 
             for lag in self.config.lag_periods:  # [1, 2, 6]
                 if n_observations > lag:
-                    # Enough history: use real historical value
                     features[f"{col}_lag_{lag}"] = series.iloc[-(lag + 1)]
                 else:
-                    # Cold-start: synthesize trend based on value extremity
-                    normal_range = self.NORMAL_RANGES.get(
-                        col, (current_value * 0.8, current_value * 1.2)
-                    )
-                    low, high = normal_range
-
-                    if current_value > high:
-                        # Value is high: simulate rising trend (lags were lower)
-                        trend_factor = 0.95
-                    elif current_value < low:
-                        # Value is low: simulate falling trend (lags were higher)
-                        trend_factor = 1.05
-                    else:
-                        # Normal: stable history
-                        trend_factor = 1.0
-
-                    features[f"{col}_lag_{lag}"] = current_value * (trend_factor**lag)
+                    features[f"{col}_lag_{lag}"] = 0.0
 
         return features
 
     def compute_tool_wear_rate(self, df: pd.DataFrame) -> float:
         """
-        Compute tool_wear_rate.
-
-        For cold-start (< 2 observations): estimate rate based on wear level
-        For enough history: use diff() like training (feature_engineer.py lines 474-476)
+        Compute tool_wear_rate via diff(), exactly like training
+        (feature_engineer.py lines 474-476). With < 2 observations,
+        diff() is NaN and is filled with 0 (same as a machine's first
+        training row), not an estimated rate.
         """
-        if "tool_wear_min" not in df.columns:
+        if "tool_wear_min" not in df.columns or len(df) < 2:
             return 0.0
-
-        if len(df) < 2:
-            # Cold-start: estimate wear rate based on current wear level
-            # Higher wear levels typically have higher wear rates
-            tool_wear = df["tool_wear_min"].iloc[-1]
-            # Estimate ~0.5-2.0 wear units per period depending on wear level
-            if tool_wear > 200:
-                return 2.0  # High wear = high rate
-            elif tool_wear > 100:
-                return 1.0  # Medium wear
-            else:
-                return 0.5  # Low wear
 
         rate = df["tool_wear_min"].diff().iloc[-1]
         return max(rate, 0.0) if pd.notna(rate) else 0.0
@@ -419,6 +325,8 @@ class PredictResponse(BaseModel):
     confidence: str
     markdown_report: str
     json_summary: dict[str, Any]
+    is_cold_start: bool
+    history_observations: int
 
 
 class AlertResponse(BaseModel):
@@ -553,12 +461,22 @@ app.add_middleware(
 # statistics computed from historical observations, fixing the train-serve mismatch.
 
 
-def engineer_features(system: SystemMetrics, application: ApplicationLogs) -> pd.DataFrame:
+def engineer_features(
+    system: SystemMetrics, application: ApplicationLogs
+) -> tuple[pd.DataFrame, bool, int]:
     """
     Transform raw metrics into model features using the Feature Store.
 
-    This now computes REAL rolling mean/std and lag features from historical
+    This computes REAL rolling mean/std and lag features from historical
     observations, exactly as done during training (feature_engineer.py).
+    No values are fabricated for cold-start machines — see
+    FeatureStore's docstring.
+
+    Returns:
+        (features_df, is_cold_start, n_history): is_cold_start is True
+        when this machine has fewer than `min_history` buffered
+        observations, so the caller can surface that reliability signal
+        instead of returning an unqualified prediction.
 
     Pipeline:
     1. Create raw observation dict
@@ -647,7 +565,8 @@ def engineer_features(system: SystemMetrics, application: ApplicationLogs) -> pd
         features["error_rate_pct"] > 1.0 and features["torque_Nm"] > 40
     )
 
-    return pd.DataFrame([features])
+    is_cold_start = n_history < feature_store.min_history
+    return pd.DataFrame([features]), is_cold_start, n_history
 
 
 # =============================================================================
@@ -734,7 +653,14 @@ async def predict(request: PredictRequest, db: Session = Depends(get_db)):
 
     # Step 1: Engineer features
     logger.info(f"Processing prediction for machine={request.system.machine_id}")
-    features = engineer_features(request.system, request.application)
+    features, is_cold_start, n_history = engineer_features(request.system, request.application)
+    if is_cold_start:
+        logger.warning(
+            f"machine={request.system.machine_id} has only {n_history} buffered "
+            "observations (< min_history) — rolling/lag features are 0-filled "
+            "per the training warm-up convention. Flagging is_cold_start=True "
+            "rather than returning this as a fully-reliable prediction."
+        )
 
     # Step 2: Run diagnostic engine (prediction + SHAP + analysis)
     # Uses LLM-powered diagnosis with automatic fallback to rule-based
@@ -788,6 +714,8 @@ async def predict(request: PredictRequest, db: Session = Depends(get_db)):
         confidence=result.confidence,
         markdown_report=result.to_markdown(),
         json_summary=result.to_json(),
+        is_cold_start=is_cold_start,
+        history_observations=n_history,
     )
 
 

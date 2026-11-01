@@ -1,11 +1,9 @@
 """
 SentinelX - Stage 4 & 5: Deep Evaluation + Scale Test
 =======================================================
-Part 1: PR Curve analysis, threshold tuning, cost-benefit optimization
+Part 1: Reports the holdout evaluation produced by train_model.py's
+        run_training_pipeline() (no retraining, no threshold search).
 Part 2: 500K row pipeline stress test with memory profiling
-
-Paper 3 Context: Industry average is 54% False Positive rate.
-Our goal: prove we can achieve <30% FP rate while maintaining >85% Recall.
 """
 
 import json
@@ -16,14 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import xgboost as xgb
-from imblearn.over_sampling import SMOTE
-from sklearn.metrics import (
-    average_precision_score,
-    confusion_matrix,
-    precision_recall_curve,
-)
-from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import precision_recall_curve
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SentinelX.Evaluate")
@@ -36,328 +27,88 @@ logger = logging.getLogger("SentinelX.Evaluate")
 
 def run_deep_evaluation():
     """
-    Full evaluation with PR curve analysis and cost-benefit threshold tuning.
+    Report the holdout evaluation produced by THIS repo's training run.
 
-    The Precision-Recall Trade-off (for a non-technical manager):
-    ─────────────────────────────────────────────────────────────
-    Imagine you're the operations manager at a factory:
+    WHY no retraining or threshold search here?
+    A prior version of this function retrained 5 fresh models and swept
+    thresholds for a "best" operating point — that number was neither
+    the shipped model's own performance nor an honest, untuned estimate.
+    `train_model.py::run_training_pipeline` now produces the single
+    source of truth: a model trained on the dev set only, evaluated
+    once on a genuinely held-out, chronological test set at a fixed
+    threshold (0.5). This function just loads and reports that result
+    (plus a PR curve over the SAME holdout predictions, which is
+    threshold-independent and introduces no extra tuning).
 
-    PRECISION = "Of all the alarms our system fires, how many are REAL?"
-      - 72% precision → Every 10 alarms, 7 are real, 3 are false.
-      - 90% precision → Every 10 alarms, 9 are real, only 1 is false.
-      - Higher precision = fewer unnecessary technician dispatches.
-
-    RECALL = "Of all REAL failures, how many did we catch?"
-      - 88% recall → We catch 88 out of 100 real failures.
-      - 95% recall → We catch 95 out of 100, miss only 5.
-      - Higher recall = fewer surprise breakdowns.
-
-    THE TRADE-OFF:
-      - Crank up precision → more missed failures (lower recall)
-      - Crank up recall → more false alarms (lower precision)
-      - The THRESHOLD is the dial that controls this balance.
-
-    OUR JOB: Find the threshold where the COST of false alarms
-    vs. the COST of missed failures is minimized.
+    The previous "industry FP rate" (54%) baseline and "extrapolated
+    annual savings" figures are removed: they were not sourced from any
+    verifiable artifact in this repo.
     """
-    from train_model import TrainConfig, load_feature_matrix
+    import joblib
+
+    from train_model import TrainConfig, evaluate_on_holdout, load_raw_matrix, prepare_X_y, split_dev_holdout
 
     logger.info("=" * 70)
-    logger.info("SENTINELX STAGE 4: DEEP EVALUATION & THRESHOLD TUNING")
+    logger.info("SENTINELX STAGE 4: HOLDOUT EVALUATION REPORT")
     logger.info("=" * 70)
 
     config = TrainConfig()
-    X, y, feature_names = load_feature_matrix(config)
+    model_dir = Path(config.model_output_dir)
 
-    # --- Collect out-of-fold predictions for unbiased PR curve ---
-    # WHY out-of-fold?
-    # If we train on all data then evaluate on training data → optimistic.
-    # Out-of-fold: each sample is predicted by a model that NEVER saw it.
-    logger.info("\nCollecting out-of-fold predictions (5-Fold CV)...")
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    all_y_true = []
-    all_y_proba = []
-
-    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y)):
-        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
-
-        smote = SMOTE(k_neighbors=5, sampling_strategy=0.5, random_state=42 + fold_idx)
-        X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
-
-        model = xgb.XGBClassifier(
-            n_estimators=500,
-            max_depth=6,
-            learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.7,
-            reg_alpha=0.1,
-            reg_lambda=1.0,
-            min_child_weight=10,
-            gamma=0.1,
-            scale_pos_weight=1.0,
-            eval_metric="aucpr",
-            tree_method="hist",
-            random_state=42,
-            n_jobs=-1,
-            early_stopping_rounds=50,
-        )
-        model.fit(X_resampled, y_resampled, eval_set=[(X_val, y_val)], verbose=False)
-
-        y_proba = model.predict_proba(X_val)[:, 1]
-        all_y_true.extend(y_val.values)
-        all_y_proba.extend(y_proba)
-
-        logger.info(f"  Fold {fold_idx+1}/5: {len(val_idx)} samples scored")
-
-    y_true = np.array(all_y_true)
-    y_proba = np.array(all_y_proba)
-
-    # --- PR Curve ---
-    precisions, recalls, thresholds = precision_recall_curve(y_true, y_proba)
-    pr_auc = average_precision_score(y_true, y_proba)
-
-    logger.info(f"\nPR-AUC (out-of-fold): {pr_auc:.4f}")
-
-    # --- Find 3 Operational Thresholds ---
-    logger.info("\n" + "=" * 70)
-    logger.info("THREE OPERATIONAL THRESHOLDS")
-    logger.info("=" * 70)
-
-    # 1. Ultra-Safe (90% Precision)
-    ultra_safe_idx = None
-    for i in range(len(precisions) - 1):
-        if precisions[i] >= 0.90:
-            ultra_safe_idx = i
-            break
-    if ultra_safe_idx is None:
-        # Find highest precision achievable
-        ultra_safe_idx = np.argmax(precisions[:-1])
-
-    ultra_safe_thresh = thresholds[ultra_safe_idx]
-    ultra_safe_prec = precisions[ultra_safe_idx]
-    ultra_safe_rec = recalls[ultra_safe_idx]
-
-    # 2. Sensitive (95% Recall)
-    sensitive_idx = None
-    for i in range(len(recalls) - 1, -1, -1):
-        if recalls[i] >= 0.95 and i < len(thresholds):
-            sensitive_idx = i
-            break
-    if sensitive_idx is None:
-        sensitive_idx = 0
-
-    sensitive_thresh = thresholds[sensitive_idx]
-    sensitive_prec = precisions[sensitive_idx]
-    sensitive_rec = recalls[sensitive_idx]
-
-    # 3. Balanced (Optimal F1)
-    f1_scores = 2 * (precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-8)
-    balanced_idx = np.argmax(f1_scores)
-    balanced_thresh = thresholds[balanced_idx]
-    balanced_prec = precisions[balanced_idx]
-    balanced_rec = recalls[balanced_idx]
-    balanced_f1 = f1_scores[balanced_idx]
-
-    logger.info(
-        f"\n  {'Mode':<15} {'Threshold':<12} {'Precision':<12} {'Recall':<12} {'F1':<10} Use Case"
-    )
-    logger.info(f"  {'─'*85}")
-    logger.info(
-        f"  {'Ultra-Safe':<15} {ultra_safe_thresh:<12.4f} {ultra_safe_prec:<12.2%} {ultra_safe_rec:<12.2%} "
-        f"{2*ultra_safe_prec*ultra_safe_rec/(ultra_safe_prec+ultra_safe_rec+1e-8):<10.4f} "
-        f"Low-tolerance (aviation, nuclear)"
-    )
-    logger.info(
-        f"  {'Balanced':<15} {balanced_thresh:<12.4f} {balanced_prec:<12.2%} {balanced_rec:<12.2%} "
-        f"{balanced_f1:<10.4f} "
-        f"General manufacturing"
-    )
-    logger.info(
-        f"  {'Sensitive':<15} {sensitive_thresh:<12.4f} {sensitive_prec:<12.2%} {sensitive_rec:<12.2%} "
-        f"{2*sensitive_prec*sensitive_rec/(sensitive_prec+sensitive_rec+1e-8):<10.4f} "
-        f"High-value assets (turbines)"
-    )
-
-    # --- PR Curve Visualization (ASCII) ---
-    logger.info(f"\n  PRECISION-RECALL CURVE (PR-AUC = {pr_auc:.4f})")
-    logger.info("  " + "─" * 62)
-
-    # Sample 20 points along the curve for ASCII display
-    n_display = 20
-    step = max(len(precisions) // n_display, 1)
-    sampled_indices = list(range(0, len(precisions) - 1, step))
-
-    logger.info("  Precision")
-    logger.info("  1.00 ┤")
-    for level in [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3]:
-        row = f"  {level:.2f} ┤ "
-        for idx in sampled_indices[:30]:
-            if precisions[idx] >= level and precisions[idx] < level + 0.1:
-                row += "●"
-            elif precisions[idx] >= level:
-                row += "│"
-            else:
-                row += " "
-        logger.info(row)
-    logger.info("  0.00 ┼" + "─" * 30)
-    logger.info("       0.0    0.25    0.50    0.75    1.0  ← Recall")
-
-    # --- Cost-Benefit Analysis ---
-    logger.info("\n" + "=" * 70)
-    logger.info("COST-BENEFIT ANALYSIS")
-    logger.info("=" * 70)
-    logger.info("  Assumptions:")
-    logger.info("    False Positive cost: $500 (unnecessary technician visit)")
-    logger.info("    False Negative cost: $5,000 (unplanned downtime)")
-    logger.info("")
-
-    FP_COST = 500
-    FN_COST = 5000
-    n_positives = y_true.sum()
-    best_profit_thresh = 0
-    best_profit = -float("inf")
-    profit_data = []
-
-    # Evaluate cost at multiple thresholds
-    for thresh_idx in range(0, len(thresholds), max(len(thresholds) // 50, 1)):
-        thresh = thresholds[thresh_idx]
-        y_pred = (y_proba >= thresh).astype(int)
-
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-
-        # Cost = FP * $500 + FN * $5000
-        # Savings = TP * $5000 (failures we caught and prevented)
-        # Net benefit = Savings - FP cost
-        total_cost = fp * FP_COST + fn * FN_COST
-        baseline_cost = n_positives * FN_COST  # Cost if we detect NOTHING
-        net_savings = baseline_cost - total_cost
-
-        profit_data.append(
-            {
-                "threshold": thresh,
-                "tp": tp,
-                "fp": fp,
-                "fn": fn,
-                "tn": tn,
-                "cost": total_cost,
-                "savings": net_savings,
-                "precision": tp / max(tp + fp, 1),
-                "recall": tp / max(tp + fn, 1),
-            }
+    eval_path = model_dir / "evaluation_results.json"
+    if not eval_path.exists():
+        raise FileNotFoundError(
+            f"{eval_path} not found. Run train_model.py's run_training_pipeline() first — "
+            "it produces the model and this holdout evaluation together."
         )
 
-        if net_savings > best_profit:
-            best_profit = net_savings
-            best_profit_thresh = thresh
-            best_profit_data = {
-                "tp": tp,
-                "fp": fp,
-                "fn": fn,
-                "tn": tn,
-                "cost": total_cost,
-                "savings": net_savings,
-            }
+    with open(eval_path) as f:
+        eval_results = json.load(f)
 
-    logger.info(f"  Baseline cost (detect nothing): ${n_positives * FN_COST:,.0f}")
-    logger.info(f"  Optimal threshold: {best_profit_thresh:.4f}")
-    logger.info(f"  Net savings at optimal: ${best_profit:,.0f}")
-    logger.info(f"  Cost reduction: {best_profit / (n_positives * FN_COST) * 100:.1f}%")
-
-    logger.info(
-        f"\n  {'Threshold':<12} {'Savings':<15} {'FP Cost':<12} {'FN Cost':<12} {'Net':<12}"
-    )
-    logger.info(f"  {'─'*63}")
-    for d in sorted(profit_data, key=lambda x: -x["savings"])[:5]:
-        fp_cost = d["fp"] * FP_COST
-        fn_cost = d["fn"] * FN_COST
-        logger.info(
-            f"  {d['threshold']:<12.4f} ${d['savings']:<14,.0f} ${fp_cost:<11,.0f} ${fn_cost:<11,.0f} ${d['savings']:<11,.0f}"
-        )
-
-    # --- Confusion Matrix at Balanced Threshold ---
-    logger.info("\n" + "=" * 70)
-    logger.info(f"CONFUSION MATRIX (Balanced threshold = {balanced_thresh:.4f})")
-    logger.info("=" * 70)
-
-    y_pred_balanced = (y_proba >= balanced_thresh).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred_balanced).ravel()
-
-    logger.info("                    Predicted")
+    logger.info(f"\n  {eval_results['note']}")
+    logger.info(f"\n  Holdout rows: {eval_results['n_holdout_rows']:,}")
+    logger.info(f"  Decision threshold (fixed, untuned): {eval_results['decision_threshold']}")
+    logger.info(f"  PR-AUC:    {eval_results['pr_auc']:.4f}")
+    logger.info(f"  F1:        {eval_results['f1']:.4f}")
+    logger.info(f"  Precision: {eval_results['precision']:.4f}")
+    logger.info(f"  Recall:    {eval_results['recall']:.4f}")
+    cm = eval_results["confusion_matrix"]
+    logger.info("\n                    Predicted")
     logger.info("                    Healthy    Failure")
-    logger.info(f"  Actual Healthy    {tn:>7,}    {fp:>7,}   (FP rate: {fp/(fp+tn)*100:.1f}%)")
-    logger.info(f"  Actual Failure    {fn:>7,}    {tp:>7,}   (Recall:  {tp/(tp+fn)*100:.1f}%)")
-    logger.info("")
-    logger.info(
-        f"  Precision: {tp/(tp+fp)*100:.1f}% | Recall: {tp/(tp+fn)*100:.1f}% | "
-        f"F1: {2*tp/(2*tp+fp+fn)*100:.1f}%"
-    )
+    logger.info(f"  Actual Healthy    {cm['tn']:>7,}    {cm['fp']:>7,}")
+    logger.info(f"  Actual Failure    {cm['fn']:>7,}    {cm['tp']:>7,}")
 
-    # --- Paper 3 Comparison ---
-    our_fp_rate = fp / (fp + tn) * 100
-    industry_fp_rate = 54.0
-    logger.info("\n  Paper 3 Comparison:")
-    logger.info(f"    Industry FP rate:  {industry_fp_rate:.0f}%")
-    logger.info(f"    SentinelX FP rate: {our_fp_rate:.1f}%")
-    logger.info(
-        f"    Improvement:       {industry_fp_rate - our_fp_rate:.1f} percentage points "
-        f"({(1 - our_fp_rate/industry_fp_rate)*100:.0f}% reduction)"
-    )
+    # --- Reproduce the PR curve on the same holdout (no retraining) ---
+    if (model_dir / "model.joblib").exists():
+        logger.info("\nRecomputing PR curve on the holdout using the saved artifacts...")
+        model = joblib.load(model_dir / "model.joblib")
+        df = load_raw_matrix(config)
+        _, df_holdout = split_dev_holdout(df, config)
 
-    # --- Confusion Matrix at Cost-Optimal Threshold ---
-    logger.info(f"\n  CONFUSION MATRIX (Cost-Optimal threshold = {best_profit_thresh:.4f})")
-    y_pred_profit = (y_proba >= best_profit_thresh).astype(int)
-    tn2, fp2, fn2, tp2 = confusion_matrix(y_true, y_pred_profit).ravel()
-    logger.info("                    Predicted")
-    logger.info("                    Healthy    Failure")
-    logger.info(f"  Actual Healthy    {tn2:>7,}    {fp2:>7,}   (FP rate: {fp2/(fp2+tn2)*100:.1f}%)")
-    logger.info(f"  Actual Failure    {fn2:>7,}    {tp2:>7,}   (Recall:  {tp2/(tp2+fn2)*100:.1f}%)")
-    logger.info(
-        f"  Precision: {tp2/(tp2+fp2)*100:.1f}% | "
-        f"Annual savings: ${best_profit * 365 / 35:,.0f} (extrapolated)"
-    )
+        recomputed = evaluate_on_holdout(model, df_holdout, config)
+        X_holdout, y_holdout, feature_cols = prepare_X_y(df_holdout, config)
+        y_proba = model.predict_proba(X_holdout)[:, 1]
+        precisions, recalls, _ = precision_recall_curve(y_holdout, y_proba)
 
-    # Save evaluation results
-    eval_results = {
-        "pr_auc": float(pr_auc),
-        "thresholds": {
-            "ultra_safe": {
-                "threshold": float(ultra_safe_thresh),
-                "precision": float(ultra_safe_prec),
-                "recall": float(ultra_safe_rec),
-            },
-            "balanced": {
-                "threshold": float(balanced_thresh),
-                "precision": float(balanced_prec),
-                "recall": float(balanced_rec),
-                "f1": float(balanced_f1),
-            },
-            "sensitive": {
-                "threshold": float(sensitive_thresh),
-                "precision": float(sensitive_prec),
-                "recall": float(sensitive_rec),
-            },
-            "cost_optimal": {
-                "threshold": float(best_profit_thresh),
-                "net_savings": float(best_profit),
-                "tp": int(best_profit_data["tp"]),
-                "fp": int(best_profit_data["fp"]),
-                "fn": int(best_profit_data["fn"]),
-                "tn": int(best_profit_data["tn"]),
-            },
-        },
-        "cost_assumptions": {"fp_cost": FP_COST, "fn_cost": FN_COST},
-        "paper3_comparison": {
-            "industry_fp_rate": industry_fp_rate,
-            "sentinelx_fp_rate": float(our_fp_rate),
-        },
-    }
+        logger.info(f"  Recomputed PR-AUC: {recomputed['pr_auc']:.4f} (saved: {eval_results['pr_auc']:.4f})")
 
-    eval_path = Path("models/evaluation_results.json")
-    with open(eval_path, "w") as f:
-        json.dump(eval_results, f, indent=2)
-    logger.info(f"\n  Results saved: {eval_path}")
+        n_display = 20
+        step = max(len(precisions) // n_display, 1)
+        sampled_indices = list(range(0, len(precisions) - 1, step))
+        logger.info(f"\n  PRECISION-RECALL CURVE (holdout, PR-AUC = {recomputed['pr_auc']:.4f})")
+        logger.info("  Precision")
+        for level in [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3]:
+            row = f"  {level:.2f} ┤ "
+            for idx in sampled_indices[:30]:
+                if level <= precisions[idx] < level + 0.1:
+                    row += "●"
+                elif precisions[idx] >= level:
+                    row += "│"
+                else:
+                    row += " "
+            logger.info(row)
+        logger.info("  0.00 ┼" + "─" * 30)
+        logger.info("       0.0    0.25    0.50    0.75    1.0  ← Recall")
 
     return eval_results
 

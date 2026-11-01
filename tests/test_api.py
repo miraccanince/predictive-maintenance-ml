@@ -1,147 +1,128 @@
 """
-Unit tests for the SentinelX API.
+Tests for the SentinelX FastAPI service (src/api/main.py), using FastAPI's
+TestClient against the real app and its real Pydantic schemas.
+
+Two tiers:
+- Fast, no external services: request validation and the "model not
+  loaded" guard, exercised WITHOUT running the app's lifespan (so no
+  PostgreSQL/model-file dependency is needed — these test the
+  validation layer and guard clause, not full prediction).
+- `@pytest.mark.integration`: full lifespan (real Postgres + the
+  trained model), exercised end-to-end. Self-skips if the database
+  isn't reachable or the model artifacts aren't present, matching this
+  repo's existing convention (see test_agent.py's Ollama check and
+  tests/e2e, which already require `docker-compose up -d`).
 """
 
+import sys
+from pathlib import Path
+
 import pytest
+from fastapi.testclient import TestClient
+
+# main.py uses bare `from agent import ...` / `from feature_engineer
+# import ...` / `from database import ...`, which only resolve when
+# src/api and src/ml are both on sys.path — mirroring how
+# docker/Dockerfile.api flattens these files into one directory.
+REPO_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src" / "api"))
+sys.path.insert(0, str(REPO_ROOT / "src" / "ml"))
+
+from main import app  # noqa: E402
+
+MODELS_DIR = Path(__file__).parent.parent / "models"
 
 
-class TestAPISchema:
-    """Test API request/response schemas."""
-
-    def test_sample_data_has_required_fields(self, sample_sensor_data):
-        """Verify sample data contains all required sections."""
-        assert "machine_id" in sample_sensor_data
-        assert "timestamp" in sample_sensor_data
-        assert "sensors" in sample_sensor_data
-        assert "system" in sample_sensor_data
-        assert "quality" in sample_sensor_data
-        assert "environment" in sample_sensor_data
-
-    def test_sensor_fields_complete(self, sample_sensor_data):
-        """Verify all sensor fields are present."""
-        sensors = sample_sensor_data["sensors"]
-        required = [
-            "air_temperature_k",
-            "process_temperature_k",
-            "rotational_speed_rpm",
-            "torque_nm",
-            "tool_wear_min",
-        ]
-        for field in required:
-            assert field in sensors, f"Missing sensor field: {field}"
-
-    def test_system_fields_complete(self, sample_sensor_data):
-        """Verify all system fields are present."""
-        system = sample_sensor_data["system"]
-        required = [
-            "cpu_utilization_percent",
-            "memory_usage_percent",
-            "disk_io_bytes_per_sec",
-            "error_rate_per_min",
-            "network_latency_ms",
-        ]
-        for field in required:
-            assert field in system, f"Missing system field: {field}"
-
-    def test_sensor_values_in_valid_range(self, sample_sensor_data):
-        """Verify sensor values are within expected physical ranges."""
-        sensors = sample_sensor_data["sensors"]
-
-        # Temperature in Kelvin (reasonable industrial range)
-        assert 250 <= sensors["air_temperature_k"] <= 400
-        assert 250 <= sensors["process_temperature_k"] <= 450
-
-        # RPM (industrial motor range)
-        assert 0 <= sensors["rotational_speed_rpm"] <= 5000
-
-        # Torque (Nm)
-        assert 0 <= sensors["torque_nm"] <= 200
-
-        # Tool wear (minutes)
-        assert 0 <= sensors["tool_wear_min"] <= 300
+def _db_reachable() -> bool:
+    try:
+        with TestClient(app):
+            return True
+    except Exception:
+        return False
 
 
-class TestDiagnosticResult:
-    """Test diagnostic result structure."""
+class TestRequestValidation:
+    """
+    These make requests without entering the app as a context manager,
+    so FastAPI's lifespan (DB init, model load) never runs. Pydantic
+    validation happens before any endpoint code, so these are valid
+    tests of the request schema regardless of DB/model state.
+    """
 
-    def test_risk_levels_valid(self):
-        """Verify valid risk level values."""
-        valid_levels = ["nominal", "low", "moderate", "high", "critical"]
-        for level in valid_levels:
-            assert level in valid_levels
+    client = TestClient(app)
 
-    def test_root_causes_valid(self):
-        """Verify valid root cause categories."""
-        valid_causes = [
-            "mechanical_wear",
-            "thermal_overload",
-            "network_congestion",
-            "software_stress",
-            "power_anomaly",
-            "complex_pattern",
-        ]
-        assert len(valid_causes) == 6
+    def test_predict_rejects_missing_required_field(self):
+        payload = {"system": {"machine_id": "X"}, "application": {}}
+        response = self.client.post("/predict", json=payload)
+        assert response.status_code == 422
 
+    def test_predict_rejects_out_of_range_temperature(self, predict_payload):
+        predict_payload["system"]["air_temperature_K"] = 9999.0
+        response = self.client.post("/predict", json=predict_payload)
+        assert response.status_code == 422
 
-class TestFeatureEngineering:
-    """Test feature engineering configuration."""
+    def test_predict_rejects_negative_torque(self, predict_payload):
+        predict_payload["system"]["torque_Nm"] = -5.0
+        response = self.client.post("/predict", json=predict_payload)
+        assert response.status_code == 422
 
-    def test_feature_count(self, feature_names):
-        """Verify expected number of features."""
-        if feature_names is None:
-            pytest.skip("Feature names file not found")
-        assert len(feature_names) == 124, f"Expected 124 features, got {len(feature_names)}"
+    def test_predict_accepts_well_formed_payload_through_validation(self, predict_payload):
+        """
+        Without lifespan, diagnostic_engine is never loaded, so this
+        exercises the explicit 503 guard in predict() rather than a
+        full prediction — proving the payload itself passes validation
+        and reaches application code.
+        """
+        response = self.client.post("/predict", json=predict_payload)
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Model not loaded"
 
-    def test_feature_names_not_empty(self, feature_names):
-        """Verify feature names are valid strings."""
-        if feature_names is None:
-            pytest.skip("Feature names file not found")
-        for name in feature_names:
-            assert isinstance(name, str)
-            assert len(name) > 0
-
-    def test_rolling_features_present(self, feature_names):
-        """Verify rolling window features are included."""
-        if feature_names is None:
-            pytest.skip("Feature names file not found")
-
-        rolling_indicators = ["_mean_", "_std_", "_min_", "_max_"]
-        has_rolling = any(any(ind in name for ind in rolling_indicators) for name in feature_names)
-        assert has_rolling, "Rolling window features should be present"
-
-    def test_lag_features_present(self, feature_names):
-        """Verify lag features are included."""
-        if feature_names is None:
-            pytest.skip("Feature names file not found")
-
-        has_lag = any("_lag_" in name for name in feature_names)
-        assert has_lag, "Lag features should be present"
+    def test_acknowledge_rejects_missing_acknowledged_by(self):
+        response = self.client.post("/alerts/1/acknowledge", json={})
+        assert response.status_code == 422
 
 
-class TestModelConfig:
-    """Test model configuration."""
+@pytest.mark.integration
+class TestPredictEndToEnd:
+    """Full lifespan: real Postgres + the trained model."""
 
-    def test_config_has_required_keys(self, model_config):
-        """Verify training config has required parameters."""
-        if model_config is None:
-            pytest.skip("Model config file not found")
+    @pytest.fixture(autouse=True)
+    def _skip_if_unavailable(self):
+        required = ["model.joblib", "feature_names.json", "evaluation_results.json"]
+        if not all((MODELS_DIR / name).exists() for name in required):
+            pytest.skip("Model artifacts not present — run train_model.py first")
+        if not _db_reachable():
+            pytest.skip("PostgreSQL not reachable — start it with docker-compose up -d")
 
-        # Check for XGBoost params (nested under xgb_params)
-        assert "xgb_params" in model_config or any(
-            key in model_config for key in ["n_estimators", "max_depth", "learning_rate"]
-        )
+    def test_health_reports_model_loaded(self):
+        with TestClient(app) as client:
+            response = client.get("/health")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["model_loaded"] is True
 
-        # If xgb_params exists, check nested structure
-        if "xgb_params" in model_config:
-            xgb = model_config["xgb_params"]
-            assert "n_estimators" in xgb
-            assert "max_depth" in xgb
+    def test_predict_flags_cold_start_on_first_call(self, predict_payload):
+        with TestClient(app) as client:
+            response = client.post("/predict", json=predict_payload)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["is_cold_start"] is True
+        assert body["history_observations"] == 1
+        assert 0.0 <= body["failure_probability"] <= 1.0
+        assert "alert_id" in body
 
-    def test_threshold_configured(self, model_config):
-        """Verify decision threshold is configured."""
-        if model_config is None:
-            pytest.skip("Model config file not found")
+    def test_predict_clears_cold_start_after_enough_history(self, predict_payload):
+        with TestClient(app) as client:
+            for _ in range(6):
+                response = client.post("/predict", json=predict_payload)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["is_cold_start"] is False
+        assert body["history_observations"] >= 6
 
-        if "threshold" in model_config:
-            threshold = model_config["threshold"]
-            assert 0 < threshold < 1, "Threshold should be between 0 and 1"
+    def test_predict_persists_a_retrievable_alert(self, predict_payload):
+        with TestClient(app) as client:
+            created = client.post("/predict", json=predict_payload).json()
+            fetched = client.get(f"/alerts/{created['alert_id']}")
+        assert fetched.status_code == 200
+        assert fetched.json()["machine_id"] == predict_payload["system"]["machine_id"]

@@ -6,7 +6,7 @@ This document is a full summary of the SentinelX project: what was built, why, w
 
 ## What the project is
 
-SentinelX is a predictive maintenance and anomaly detection system for industrial environments. It ingests real-time sensor data from machines, predicts failures before they happen, explains each prediction using SHAP, and generates natural-language diagnostic summaries via a local LLM. The full stack includes a trained ML model, a REST API, a database, a dashboard, and a CI/CD pipeline.
+SentinelX is a predictive maintenance and anomaly detection system for industrial environments. It ingests real-time sensor data from machines, predicts failures before they happen, explains each prediction using SHAP, and generates natural-language diagnostic summaries via a local LLM. The full stack includes a trained ML model, a REST API, a database, a dashboard, and a CI pipeline.
 
 The project was built solo, in stages, across January 2026.
 
@@ -27,7 +27,7 @@ Four research papers were read and referenced throughout the project. They are i
 **Paper 1 — "A Hybrid Machine Learning Approach" (A hybrid machine learning approach.pdf)**
 - Proposed combining supervised and unsupervised methods for fault detection
 - Discussed cross-domain feature fusion (combining mechanical + IT/software sensor signals)
-- Influenced: the decision to use both XGBoost (supervised) and an autoencoder (unsupervised) in parallel; the design of cross-domain engineered features like `thermal_efficiency_idx` and `torque_wear_product`
+- Influenced: the design of cross-domain engineered features like `thermal_efficiency_idx` and `torque_wear_product` (an earlier version also paired XGBoost with an autoencoder; the autoencoder was removed after an ablation showed its contribution was negligible — see Stage 3b below)
 
 **Paper 2 — "Anomaly Detection in Network Traffic Using Advanced ML Techniques" (Anomaly_Detection_in_Network_Traffic_Using_Advanced_Machine_Learning_Techniques.pdf)**
 - Addressed class imbalance in anomaly detection settings
@@ -48,7 +48,7 @@ Four research papers were read and referenced throughout the project. They are i
 
 ## What was built, stage by stage
 
-The project was developed in 9 stages, each corresponding to a Jupyter notebook and a set of source files.
+The project was developed in 8 stages, each corresponding to a Jupyter notebook and a set of source files.
 
 **Stage 1 — Data ingestion and quality gates**
 Raw sensor data arrives as a stream. A `stream_manager.py` validates incoming readings before they enter the pipeline. Informed by Paper 4.
@@ -69,17 +69,17 @@ XGBoost classifier trained on the 124 features.
 - 500 estimators, depth 6, learning rate 0.05
 - Final trained on ~411 trees on average across folds
 
-**Stage 4 — Anomaly detection baseline**
-A PyTorch autoencoder trained only on healthy machine readings. It learns to reconstruct normal behavior; high reconstruction error signals anomaly. Architecture: 124 input → 16-dimensional latent space. Used in parallel with XGBoost to catch novelty/out-of-distribution events that supervised models might miss.
+**Stage 3b — Autoencoder ablation (removed)**
+An earlier version paired XGBoost with a PyTorch autoencoder (trained on healthy readings only, reconstruction error as an added feature). A forward-chaining CV ablation on development data only (holdout untouched) found its contribution negligible — well within fold-to-fold noise on both PR-AUC and F1 — so it was removed. The pipeline reverted to the 124-feature XGBoost model.
 
-**Stage 5 — Evaluation and threshold calibration**
+**Stage 4 — Evaluation and threshold calibration**
 Model evaluated at 500k scale. Three operational threshold modes were defined based on precision-recall tradeoffs:
 - `ultra_safe`: threshold 0.937, precision 0.90, recall 0.48
 - `balanced`: threshold 0.634, precision 0.759, recall 0.827, F1 0.792
 - `sensitive`: threshold 0.217, precision 0.614, recall 0.950
 Cost-optimal analysis: FP costs $500, FN costs $5,000 → projected net savings $11.6M under cost assumptions.
 
-**Stage 6 — SHAP explainability engine**
+**Stage 5 — SHAP explainability engine**
 SHAP TreeExplainer computes per-prediction feature attributions. Top contributing features across the dataset:
 1. disk_io_wait_ms (1.93 mean |SHAP|)
 2. error_rate_pct (1.10)
@@ -88,13 +88,13 @@ SHAP TreeExplainer computes per-prediction feature attributions. Top contributin
 5. packet_loss_pct (0.43)
 6. vibration_mm_s (0.34)
 
-**Stage 7 — FastAPI backend and PostgreSQL persistence**
+**Stage 6 — FastAPI backend and PostgreSQL persistence**
 REST API at port 8000. Endpoints: `/predict`, `/stream`, `/health`, `/alerts`, `/fatigue`. PostgreSQL with JSONB columns for sensor payloads and SHAP values — schema is flexible because sensor configurations differ by machine type. SQLAlchemy ORM.
 
-**Stage 8 — Streamlit dashboard**
+**Stage 7 — Streamlit dashboard**
 Frontend showing live predictions, historical alert log, SHAP waterfall charts, and a savings counter comparing SentinelX FP rate to industry baseline.
 
-**Stage 9 — Local LLM integration**
+**Stage 8 — Local LLM integration**
 Ollama running Llama 3.2 locally generates natural-language diagnostic summaries from SHAP values. Async aiohttp calls, structured output (JSON + Markdown), chain-of-thought prompting, automatic fallback to rule-based logic if Ollama is unavailable. No cloud API calls — chosen for data privacy, zero latency dependency, zero token cost.
 
 ---
@@ -125,8 +125,6 @@ CI/CD was implemented from day one, not retrofitted. This was a deliberate engin
 | Engineered features | 124 |
 | CV folds | 5 |
 | Avg trees used | 411 |
-| Autoencoder latent dim | 16 |
-| Training samples (healthy, for AE) | 37,916 |
 
 ---
 

@@ -2,499 +2,499 @@
   "feature_importance": [
     {
       "feature": "disk_io_wait_ms",
-      "mean_abs_shap": 1.929581642150879
+      "mean_abs_shap": 2.046013832092285
     },
     {
       "feature": "error_rate_pct",
-      "mean_abs_shap": 1.1017329692840576
+      "mean_abs_shap": 1.0803536176681519
     },
     {
       "feature": "error_rate_pct_lag_1",
-      "mean_abs_shap": 0.7780212163925171
+      "mean_abs_shap": 0.6415618658065796
     },
     {
       "feature": "error_rate_pct_lag_2",
-      "mean_abs_shap": 0.5894722938537598
+      "mean_abs_shap": 0.565909743309021
     },
     {
       "feature": "fuzzy_pid_output",
-      "mean_abs_shap": 0.5877909660339355
+      "mean_abs_shap": 0.5153133869171143
     },
     {
       "feature": "packet_loss_pct",
-      "mean_abs_shap": 0.43440064787864685
-    },
-    {
-      "feature": "network_latency_ms",
-      "mean_abs_shap": 0.39375734329223633
+      "mean_abs_shap": 0.5137255191802979
     },
     {
       "feature": "vibration_mm_s",
-      "mean_abs_shap": 0.34170275926589966
-    },
-    {
-      "feature": "api_response_latency_ms",
-      "mean_abs_shap": 0.3325650990009308
+      "mean_abs_shap": 0.4063139259815216
     },
     {
       "feature": "request_throughput_rps",
-      "mean_abs_shap": 0.33121153712272644
+      "mean_abs_shap": 0.3511935770511627
     },
     {
-      "feature": "disk_io_wait_ms_mean_6",
-      "mean_abs_shap": 0.3146430552005768
+      "feature": "network_latency_ms",
+      "mean_abs_shap": 0.33502259850502014
     },
     {
-      "feature": "pressure_psi",
-      "mean_abs_shap": 0.2958841919898987
-    },
-    {
-      "feature": "edge_processing_time_ms",
-      "mean_abs_shap": 0.24729429185390472
+      "feature": "api_response_latency_ms",
+      "mean_abs_shap": 0.29708442091941833
     },
     {
       "feature": "http_5xx_count",
-      "mean_abs_shap": 0.24724943935871124
+      "mean_abs_shap": 0.2660517692565918
     },
     {
-      "feature": "vibration_mm_s_lag_1",
-      "mean_abs_shap": 0.24454589188098907
+      "feature": "pressure_psi",
+      "mean_abs_shap": 0.2514912784099579
     },
     {
-      "feature": "tool_wear_min_std_36",
-      "mean_abs_shap": 0.20141105353832245
+      "feature": "disk_io_wait_ms_mean_6",
+      "mean_abs_shap": 0.24591918289661407
     },
     {
-      "feature": "vibration_mm_s_lag_2",
-      "mean_abs_shap": 0.18466006219387054
+      "feature": "edge_processing_time_ms",
+      "mean_abs_shap": 0.2308545857667923
     },
     {
       "feature": "queue_depth",
-      "mean_abs_shap": 0.18453752994537354
+      "mean_abs_shap": 0.20360217988491058
     },
     {
-      "feature": "process_temperature_K",
-      "mean_abs_shap": 0.16167643666267395
+      "feature": "tool_wear_min_std_36",
+      "mean_abs_shap": 0.17990900576114655
     },
     {
       "feature": "memory_utilization_pct",
-      "mean_abs_shap": 0.1533517986536026
+      "mean_abs_shap": 0.1730281114578247
     },
     {
-      "feature": "instantaneous_power_W",
-      "mean_abs_shap": 0.15027381479740143
-    },
-    {
-      "feature": "tool_wear_rate",
-      "mean_abs_shap": 0.1404828131198883
+      "feature": "vibration_mm_s_lag_1",
+      "mean_abs_shap": 0.16822217404842377
     },
     {
       "feature": "thermal_efficiency_idx",
-      "mean_abs_shap": 0.1399359107017517
+      "mean_abs_shap": 0.1539153754711151
     },
     {
-      "feature": "cpu_utilization_pct",
-      "mean_abs_shap": 0.12265834957361221
+      "feature": "vibration_mm_s_lag_2",
+      "mean_abs_shap": 0.15106238424777985
+    },
+    {
+      "feature": "tool_wear_rate",
+      "mean_abs_shap": 0.14051146805286407
+    },
+    {
+      "feature": "process_temperature_K",
+      "mean_abs_shap": 0.1365378499031067
     },
     {
       "feature": "api_response_latency_ms_lag_1",
-      "mean_abs_shap": 0.11064545810222626
+      "mean_abs_shap": 0.12666594982147217
     },
     {
-      "feature": "api_response_latency_ms_std_6",
-      "mean_abs_shap": 0.10055822134017944
+      "feature": "instantaneous_power_W",
+      "mean_abs_shap": 0.12277267128229141
     },
     {
-      "feature": "process_temperature_K_std_36",
-      "mean_abs_shap": 0.0983685851097107
-    },
-    {
-      "feature": "memory_utilization_pct_std_12",
-      "mean_abs_shap": 0.09295138716697693
-    },
-    {
-      "feature": "vibration_mm_s_std_6",
-      "mean_abs_shap": 0.0897190198302269
+      "feature": "cpu_utilization_pct",
+      "mean_abs_shap": 0.11387152224779129
     },
     {
       "feature": "api_response_latency_ms_lag_2",
-      "mean_abs_shap": 0.07895486801862717
+      "mean_abs_shap": 0.10336519777774811
     },
     {
-      "feature": "tool_wear_min_std_12",
-      "mean_abs_shap": 0.07849684357643127
+      "feature": "api_response_latency_ms_std_6",
+      "mean_abs_shap": 0.1007605493068695
     },
     {
-      "feature": "disk_io_wait_ms_mean_12",
-      "mean_abs_shap": 0.07454732805490494
+      "feature": "vibration_mm_s_std_6",
+      "mean_abs_shap": 0.0827355682849884
     },
     {
-      "feature": "power_anomaly_score",
-      "mean_abs_shap": 0.06580303609371185
+      "feature": "process_temperature_K_std_36",
+      "mean_abs_shap": 0.08245991170406342
     },
     {
-      "feature": "tool_wear_min_lag_2",
-      "mean_abs_shap": 0.06562034040689468
-    },
-    {
-      "feature": "torque_Nm_lag_2",
-      "mean_abs_shap": 0.06352091580629349
-    },
-    {
-      "feature": "tool_wear_min",
-      "mean_abs_shap": 0.06215288117527962
-    },
-    {
-      "feature": "cpu_utilization_pct_std_12",
-      "mean_abs_shap": 0.06032230705022812
-    },
-    {
-      "feature": "error_under_stress",
-      "mean_abs_shap": 0.06020619347691536
-    },
-    {
-      "feature": "torque_Nm_lag_1",
-      "mean_abs_shap": 0.057230059057474136
+      "feature": "memory_utilization_pct_std_12",
+      "mean_abs_shap": 0.08077371120452881
     },
     {
       "feature": "memory_utilization_pct_std_6",
-      "mean_abs_shap": 0.05512479320168495
-    },
-    {
-      "feature": "disk_io_wait_ms_std_12",
-      "mean_abs_shap": 0.05497040972113609
-    },
-    {
-      "feature": "disk_io_wait_ms_std_6",
-      "mean_abs_shap": 0.05377938225865364
-    },
-    {
-      "feature": "error_rate_pct_std_6",
-      "mean_abs_shap": 0.05276547744870186
-    },
-    {
-      "feature": "cpu_utilization_pct_std_6",
-      "mean_abs_shap": 0.05263553932309151
-    },
-    {
-      "feature": "air_temperature_K_std_36",
-      "mean_abs_shap": 0.052481211721897125
-    },
-    {
-      "feature": "cpu_utilization_pct_lag_2",
-      "mean_abs_shap": 0.05025911331176758
-    },
-    {
-      "feature": "process_temperature_K_std_6",
-      "mean_abs_shap": 0.04478486627340317
-    },
-    {
-      "feature": "vibration_mm_s_std_12",
-      "mean_abs_shap": 0.044733114540576935
-    },
-    {
-      "feature": "process_temperature_K_std_12",
-      "mean_abs_shap": 0.04275143891572952
+      "mean_abs_shap": 0.07653331011533737
     },
     {
       "feature": "tool_wear_min_lag_1",
-      "mean_abs_shap": 0.041579362004995346
+      "mean_abs_shap": 0.07597926259040833
     },
     {
-      "feature": "tool_wear_min_mean_6",
-      "mean_abs_shap": 0.040488917380571365
+      "feature": "air_temperature_K_std_36",
+      "mean_abs_shap": 0.06609475612640381
     },
     {
-      "feature": "torque_Nm",
-      "mean_abs_shap": 0.038733482360839844
+      "feature": "process_temperature_K_std_12",
+      "mean_abs_shap": 0.06475821882486343
     },
     {
-      "feature": "error_rate_pct_lag_6",
-      "mean_abs_shap": 0.03804647549986839
+      "feature": "tool_wear_min_std_12",
+      "mean_abs_shap": 0.058112733066082
     },
     {
-      "feature": "air_temperature_K_std_12",
-      "mean_abs_shap": 0.037996429949998856
+      "feature": "torque_Nm_lag_2",
+      "mean_abs_shap": 0.05704065412282944
     },
     {
-      "feature": "rotational_speed_rpm",
-      "mean_abs_shap": 0.03753683716058731
+      "feature": "cpu_utilization_pct_std_12",
+      "mean_abs_shap": 0.05628114193677902
     },
     {
-      "feature": "tool_wear_min_std_6",
-      "mean_abs_shap": 0.03702044114470482
+      "feature": "power_anomaly_score",
+      "mean_abs_shap": 0.054273493587970734
     },
     {
-      "feature": "cpu_utilization_pct_std_36",
-      "mean_abs_shap": 0.036773279309272766
+      "feature": "tool_wear_min",
+      "mean_abs_shap": 0.054045867174863815
     },
     {
-      "feature": "torque_Nm_lag_6",
-      "mean_abs_shap": 0.03673698753118515
+      "feature": "cpu_utilization_pct_lag_2",
+      "mean_abs_shap": 0.05337909609079361
     },
     {
-      "feature": "air_temperature_K_mean_36",
-      "mean_abs_shap": 0.03659778833389282
+      "feature": "process_temperature_K_std_6",
+      "mean_abs_shap": 0.048022110015153885
+    },
+    {
+      "feature": "error_under_stress",
+      "mean_abs_shap": 0.0476476326584816
     },
     {
       "feature": "cpu_utilization_pct_lag_1",
-      "mean_abs_shap": 0.036463528871536255
-    },
-    {
-      "feature": "pressure_psi_std_36",
-      "mean_abs_shap": 0.03577190637588501
-    },
-    {
-      "feature": "pressure_psi_std_6",
-      "mean_abs_shap": 0.034700654447078705
-    },
-    {
-      "feature": "vibration_mm_s_mean_12",
-      "mean_abs_shap": 0.033588577061891556
-    },
-    {
-      "feature": "queue_depth_std_6",
-      "mean_abs_shap": 0.0330251045525074
-    },
-    {
-      "feature": "process_temperature_K_mean_36",
-      "mean_abs_shap": 0.03269875794649124
+      "mean_abs_shap": 0.04534941539168358
     },
     {
       "feature": "air_temperature_K_std_6",
-      "mean_abs_shap": 0.03231026604771614
-    },
-    {
-      "feature": "expected_power_W",
-      "mean_abs_shap": 0.0319974310696125
-    },
-    {
-      "feature": "torque_Nm_mean_36",
-      "mean_abs_shap": 0.031194251030683517
-    },
-    {
-      "feature": "vibration_mm_s_lag_6",
-      "mean_abs_shap": 0.03095448948442936
+      "mean_abs_shap": 0.045235466212034225
     },
     {
       "feature": "queue_depth_mean_12",
-      "mean_abs_shap": 0.030268875882029533
+      "mean_abs_shap": 0.04497433826327324
     },
     {
-      "feature": "api_response_latency_ms_lag_6",
-      "mean_abs_shap": 0.0301570612937212
-    },
-    {
-      "feature": "pressure_psi_mean_36",
-      "mean_abs_shap": 0.029622506350278854
-    },
-    {
-      "feature": "queue_depth_std_12",
-      "mean_abs_shap": 0.02925550565123558
-    },
-    {
-      "feature": "vibration_mm_s_mean_6",
-      "mean_abs_shap": 0.028796695172786713
-    },
-    {
-      "feature": "rotational_speed_rpm_std_36",
-      "mean_abs_shap": 0.027569998055696487
-    },
-    {
-      "feature": "cpu_utilization_pct_mean_12",
-      "mean_abs_shap": 0.02745596319437027
+      "feature": "tool_wear_min_lag_2",
+      "mean_abs_shap": 0.04386410489678383
     },
     {
       "feature": "memory_utilization_pct_std_36",
-      "mean_abs_shap": 0.027240362018346786
+      "mean_abs_shap": 0.04134059324860573
     },
     {
-      "feature": "torque_Nm_std_36",
-      "mean_abs_shap": 0.027194203808903694
+      "feature": "pressure_psi_std_6",
+      "mean_abs_shap": 0.04054968059062958
     },
     {
-      "feature": "torque_Nm_std_12",
-      "mean_abs_shap": 0.026920810341835022
+      "feature": "torque_Nm_lag_1",
+      "mean_abs_shap": 0.03798157721757889
     },
     {
-      "feature": "pressure_psi_std_12",
-      "mean_abs_shap": 0.024792948737740517
+      "feature": "disk_io_wait_ms_mean_12",
+      "mean_abs_shap": 0.037778161466121674
     },
     {
-      "feature": "cpu_utilization_pct_mean_6",
-      "mean_abs_shap": 0.024768829345703125
+      "feature": "torque_Nm",
+      "mean_abs_shap": 0.03716558590531349
     },
     {
-      "feature": "api_response_latency_ms_mean_36",
-      "mean_abs_shap": 0.022451771423220634
+      "feature": "cpu_utilization_pct_std_36",
+      "mean_abs_shap": 0.037137649953365326
     },
     {
-      "feature": "tool_wear_min_mean_36",
-      "mean_abs_shap": 0.02220325917005539
+      "feature": "air_temperature_K_mean_36",
+      "mean_abs_shap": 0.03517232462763786
     },
     {
-      "feature": "api_response_latency_ms_std_12",
-      "mean_abs_shap": 0.021903354674577713
+      "feature": "vibration_mm_s_lag_6",
+      "mean_abs_shap": 0.034792445600032806
     },
     {
-      "feature": "memory_utilization_pct_mean_36",
-      "mean_abs_shap": 0.021810099482536316
+      "feature": "queue_depth_std_6",
+      "mean_abs_shap": 0.03227952867746353
     },
     {
-      "feature": "rotational_speed_rpm_std_6",
-      "mean_abs_shap": 0.021754363551735878
+      "feature": "vibration_mm_s_std_12",
+      "mean_abs_shap": 0.03173428028821945
     },
     {
-      "feature": "tool_wear_min_lag_6",
-      "mean_abs_shap": 0.021558202803134918
+      "feature": "torque_Nm_lag_6",
+      "mean_abs_shap": 0.03135884553194046
     },
     {
-      "feature": "tool_wear_min_mean_12",
-      "mean_abs_shap": 0.021458519622683525
-    },
-    {
-      "feature": "api_response_latency_ms_mean_12",
-      "mean_abs_shap": 0.020949609577655792
-    },
-    {
-      "feature": "torque_Nm_std_6",
-      "mean_abs_shap": 0.020702078938484192
-    },
-    {
-      "feature": "memory_utilization_pct_mean_12",
-      "mean_abs_shap": 0.02038656547665596
-    },
-    {
-      "feature": "torque_Nm_mean_6",
-      "mean_abs_shap": 0.019807761535048485
+      "feature": "queue_depth_std_12",
+      "mean_abs_shap": 0.03133821859955788
     },
     {
       "feature": "error_rate_pct_std_36",
-      "mean_abs_shap": 0.01958073116838932
+      "mean_abs_shap": 0.03112270124256611
     },
     {
-      "feature": "vibration_mm_s_std_36",
-      "mean_abs_shap": 0.019478514790534973
+      "feature": "error_rate_pct_std_6",
+      "mean_abs_shap": 0.03098561055958271
     },
     {
-      "feature": "rotational_speed_rpm_std_12",
-      "mean_abs_shap": 0.018129486590623856
+      "feature": "rotational_speed_rpm",
+      "mean_abs_shap": 0.03071553260087967
     },
     {
-      "feature": "rotational_speed_rpm_mean_6",
-      "mean_abs_shap": 0.01678316853940487
-    },
-    {
-      "feature": "queue_depth_mean_6",
-      "mean_abs_shap": 0.016487296670675278
-    },
-    {
-      "feature": "disk_io_wait_ms_std_36",
-      "mean_abs_shap": 0.016365263611078262
+      "feature": "api_response_latency_ms_mean_12",
+      "mean_abs_shap": 0.030426541343331337
     },
     {
       "feature": "memory_utilization_pct_mean_6",
-      "mean_abs_shap": 0.01576940529048443
+      "mean_abs_shap": 0.029621802270412445
     },
     {
-      "feature": "error_rate_pct_mean_6",
-      "mean_abs_shap": 0.01538978423923254
+      "feature": "api_response_latency_ms_lag_6",
+      "mean_abs_shap": 0.029278464615345
     },
     {
-      "feature": "rotational_speed_rpm_mean_12",
-      "mean_abs_shap": 0.01526404544711113
+      "feature": "torque_Nm_mean_36",
+      "mean_abs_shap": 0.028101608157157898
     },
     {
-      "feature": "error_rate_pct_mean_12",
-      "mean_abs_shap": 0.014630366116762161
+      "feature": "tool_wear_min_std_6",
+      "mean_abs_shap": 0.027878867462277412
+    },
+    {
+      "feature": "cpu_utilization_pct_std_6",
+      "mean_abs_shap": 0.027545370161533356
+    },
+    {
+      "feature": "rotational_speed_rpm_std_36",
+      "mean_abs_shap": 0.026845300570130348
+    },
+    {
+      "feature": "disk_io_wait_ms_std_12",
+      "mean_abs_shap": 0.026428041979670525
+    },
+    {
+      "feature": "vibration_mm_s_mean_6",
+      "mean_abs_shap": 0.025827579200267792
+    },
+    {
+      "feature": "process_temperature_K_mean_36",
+      "mean_abs_shap": 0.02527570351958275
+    },
+    {
+      "feature": "pressure_psi_std_36",
+      "mean_abs_shap": 0.024175340309739113
     },
     {
       "feature": "vibration_mm_s_mean_36",
-      "mean_abs_shap": 0.013682267628610134
+      "mean_abs_shap": 0.023665020242333412
     },
     {
-      "feature": "process_temperature_K_mean_6",
-      "mean_abs_shap": 0.013533096760511398
+      "feature": "tool_wear_min_mean_6",
+      "mean_abs_shap": 0.023644981905817986
     },
     {
-      "feature": "rotational_speed_rpm_mean_36",
-      "mean_abs_shap": 0.013448788784444332
+      "feature": "vibration_mm_s_std_36",
+      "mean_abs_shap": 0.022592119872570038
     },
     {
-      "feature": "api_response_latency_ms_mean_6",
-      "mean_abs_shap": 0.01276672724634409
+      "feature": "cpu_utilization_pct_mean_12",
+      "mean_abs_shap": 0.022303052246570587
     },
     {
-      "feature": "air_temperature_K_lag_6",
-      "mean_abs_shap": 0.0114500867202878
+      "feature": "memory_utilization_pct_mean_12",
+      "mean_abs_shap": 0.02227414771914482
     },
     {
-      "feature": "air_temperature_K_lag_1",
-      "mean_abs_shap": 0.011308169923722744
-    },
-    {
-      "feature": "queue_depth_std_36",
-      "mean_abs_shap": 0.011097284033894539
-    },
-    {
-      "feature": "cpu_utilization_pct_lag_6",
-      "mean_abs_shap": 0.010682939551770687
-    },
-    {
-      "feature": "error_rate_pct_mean_36",
-      "mean_abs_shap": 0.010542431846261024
+      "feature": "torque_Nm_std_36",
+      "mean_abs_shap": 0.021145865321159363
     },
     {
       "feature": "torque_Nm_mean_12",
-      "mean_abs_shap": 0.010476851835846901
+      "mean_abs_shap": 0.021092643961310387
     },
     {
-      "feature": "air_temperature_K_mean_6",
-      "mean_abs_shap": 0.010247105732560158
+      "feature": "disk_io_wait_ms_std_6",
+      "mean_abs_shap": 0.020728496834635735
     },
     {
-      "feature": "pressure_psi_mean_12",
-      "mean_abs_shap": 0.009797977283596992
+      "feature": "air_temperature_K_std_12",
+      "mean_abs_shap": 0.020167792215943336
     },
     {
-      "feature": "queue_depth_mean_36",
-      "mean_abs_shap": 0.009354090318083763
+      "feature": "expected_power_W",
+      "mean_abs_shap": 0.01959090307354927
+    },
+    {
+      "feature": "torque_Nm_std_12",
+      "mean_abs_shap": 0.019480768591165543
+    },
+    {
+      "feature": "error_rate_pct_mean_12",
+      "mean_abs_shap": 0.019266052171587944
+    },
+    {
+      "feature": "tool_wear_min_mean_36",
+      "mean_abs_shap": 0.018779940903186798
+    },
+    {
+      "feature": "vibration_mm_s_mean_12",
+      "mean_abs_shap": 0.01873050630092621
+    },
+    {
+      "feature": "cpu_utilization_pct_mean_6",
+      "mean_abs_shap": 0.018427202478051186
+    },
+    {
+      "feature": "pressure_psi_mean_36",
+      "mean_abs_shap": 0.018088070675730705
+    },
+    {
+      "feature": "error_rate_pct_lag_6",
+      "mean_abs_shap": 0.017603591084480286
+    },
+    {
+      "feature": "tool_wear_min_mean_12",
+      "mean_abs_shap": 0.017424877732992172
+    },
+    {
+      "feature": "tool_wear_min_lag_6",
+      "mean_abs_shap": 0.01648060791194439
+    },
+    {
+      "feature": "torque_Nm_mean_6",
+      "mean_abs_shap": 0.016068311408162117
+    },
+    {
+      "feature": "rotational_speed_rpm_mean_12",
+      "mean_abs_shap": 0.01568216271698475
+    },
+    {
+      "feature": "rotational_speed_rpm_std_6",
+      "mean_abs_shap": 0.014626264572143555
+    },
+    {
+      "feature": "error_rate_pct_mean_6",
+      "mean_abs_shap": 0.013896800577640533
+    },
+    {
+      "feature": "pressure_psi_std_12",
+      "mean_abs_shap": 0.013804574497044086
+    },
+    {
+      "feature": "air_temperature_K_lag_1",
+      "mean_abs_shap": 0.013580809347331524
     },
     {
       "feature": "error_rate_pct_std_12",
-      "mean_abs_shap": 0.009324432350695133
+      "mean_abs_shap": 0.01278796698898077
     },
     {
-      "feature": "api_response_latency_ms_std_36",
-      "mean_abs_shap": 0.008844511583447456
+      "feature": "rotational_speed_rpm_mean_6",
+      "mean_abs_shap": 0.012299126014113426
     },
     {
-      "feature": "pressure_psi_mean_6",
-      "mean_abs_shap": 0.008253544569015503
+      "feature": "queue_depth_mean_36",
+      "mean_abs_shap": 0.012229927815496922
+    },
+    {
+      "feature": "api_response_latency_ms_std_12",
+      "mean_abs_shap": 0.011825493536889553
+    },
+    {
+      "feature": "cpu_utilization_pct_lag_6",
+      "mean_abs_shap": 0.011272511444985867
+    },
+    {
+      "feature": "queue_depth_mean_6",
+      "mean_abs_shap": 0.011210896074771881
     },
     {
       "feature": "cpu_utilization_pct_mean_36",
-      "mean_abs_shap": 0.007468460127711296
+      "mean_abs_shap": 0.010831792838871479
     },
     {
-      "feature": "disk_io_wait_ms_mean_36",
-      "mean_abs_shap": 0.006800518836826086
+      "feature": "torque_Nm_std_6",
+      "mean_abs_shap": 0.010473047383129597
     },
     {
-      "feature": "air_temperature_K_mean_12",
-      "mean_abs_shap": 0.006747635081410408
-    },
-    {
-      "feature": "air_temperature_K",
-      "mean_abs_shap": 0.006683161947876215
-    },
-    {
-      "feature": "air_temperature_K_lag_2",
-      "mean_abs_shap": 0.005219432525336742
+      "feature": "queue_depth_std_36",
+      "mean_abs_shap": 0.009494938887655735
     },
     {
       "feature": "process_temperature_K_mean_12",
-      "mean_abs_shap": 0.0030474322848021984
+      "mean_abs_shap": 0.009093998931348324
+    },
+    {
+      "feature": "rotational_speed_rpm_mean_36",
+      "mean_abs_shap": 0.008921717293560505
+    },
+    {
+      "feature": "api_response_latency_ms_mean_6",
+      "mean_abs_shap": 0.008756143972277641
+    },
+    {
+      "feature": "air_temperature_K_mean_12",
+      "mean_abs_shap": 0.008537900634109974
+    },
+    {
+      "feature": "air_temperature_K",
+      "mean_abs_shap": 0.007954234257340431
+    },
+    {
+      "feature": "memory_utilization_pct_mean_36",
+      "mean_abs_shap": 0.007788114249706268
+    },
+    {
+      "feature": "disk_io_wait_ms_mean_36",
+      "mean_abs_shap": 0.007692555896937847
+    },
+    {
+      "feature": "disk_io_wait_ms_std_36",
+      "mean_abs_shap": 0.007500210776925087
+    },
+    {
+      "feature": "air_temperature_K_lag_6",
+      "mean_abs_shap": 0.007392645813524723
+    },
+    {
+      "feature": "error_rate_pct_mean_36",
+      "mean_abs_shap": 0.007378304842859507
+    },
+    {
+      "feature": "air_temperature_K_lag_2",
+      "mean_abs_shap": 0.006359803024679422
+    },
+    {
+      "feature": "pressure_psi_mean_6",
+      "mean_abs_shap": 0.006090099923312664
+    },
+    {
+      "feature": "api_response_latency_ms_std_36",
+      "mean_abs_shap": 0.006020792759954929
+    },
+    {
+      "feature": "rotational_speed_rpm_std_12",
+      "mean_abs_shap": 0.006011888384819031
+    },
+    {
+      "feature": "process_temperature_K_mean_6",
+      "mean_abs_shap": 0.004939894657582045
+    },
+    {
+      "feature": "air_temperature_K_mean_6",
+      "mean_abs_shap": 0.0046727340668439865
+    },
+    {
+      "feature": "pressure_psi_mean_12",
+      "mean_abs_shap": 0.004581450950354338
+    },
+    {
+      "feature": "api_response_latency_ms_mean_36",
+      "mean_abs_shap": 0.00360818556509912
     }
   ],
   "n_samples": 5000,

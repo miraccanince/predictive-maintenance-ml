@@ -181,47 +181,6 @@ class Alert(Base):
         }
 
 
-class AlertFatigueMetrics(Base):
-    """
-    Aggregated metrics for Alert Fatigue analysis (Paper 3).
-
-    Precomputed daily aggregates to avoid expensive queries:
-    - Total alerts per machine per day
-    - Alerts by risk level
-    - Acknowledgment rate
-    - False positive rate
-
-    WHY precompute?
-    - Production query: "Show me last 30 days of alert metrics"
-    - Without aggregates: Scan millions of rows → 10+ seconds
-    - With aggregates: 30 rows → 5ms
-    """
-
-    __tablename__ = "alert_fatigue_metrics"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    date = Column(DateTime, nullable=False, index=True)
-    machine_id = Column(String(50), nullable=False, index=True)
-
-    # Volume metrics
-    total_alerts = Column(Integer, default=0)
-    critical_count = Column(Integer, default=0)
-    high_count = Column(Integer, default=0)
-    moderate_count = Column(Integer, default=0)
-    low_count = Column(Integer, default=0)
-    nominal_count = Column(Integer, default=0)
-
-    # Quality metrics
-    acknowledged_count = Column(Integer, default=0)
-    false_positive_count = Column(Integer, default=0)
-    true_positive_count = Column(Integer, default=0)
-
-    # Root cause distribution
-    root_cause_distribution = Column(JSONB, nullable=True)
-
-    __table_args__ = (Index("ix_fatigue_date_machine", date, machine_id, unique=True),)
-
-
 # =============================================================================
 # 4. DATABASE OPERATIONS (CRUD)
 # =============================================================================

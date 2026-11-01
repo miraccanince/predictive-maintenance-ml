@@ -110,10 +110,10 @@ The LLM interprets these values and generates actionable recommendations.
                     +--------+---------+
                              |
                              v
-+----------------+  +------------------+  +------------------+
-|   XGBoost      |  |      SHAP        |  |   Autoencoder    |
-|   Classifier   +->|   Explainer      |  |   (Anomaly)      |
-+----------------+  +--------+---------+  +------------------+
++----------------+  +------------------+
+|   XGBoost      |  |      SHAP        |
+|   Classifier   +->|   Explainer      |
++----------------+  +--------+---------+
                              |
                              v
                     +------------------+
@@ -186,7 +186,7 @@ Test coverage includes 27 unit tests covering API schemas, feature engineering v
 
 | Category | Technologies |
 |----------|-------------|
-| Machine Learning | XGBoost, scikit-learn, SHAP, PyTorch |
+| Machine Learning | XGBoost, scikit-learn, SHAP |
 | Data Processing | pandas, NumPy, PyArrow |
 | Backend | FastAPI, SQLAlchemy, Pydantic, aiohttp |
 | Database | PostgreSQL 15, JSONB |

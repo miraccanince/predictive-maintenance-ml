@@ -7,7 +7,7 @@
 
 SentinelX is a production-grade AIOps platform for predictive maintenance. It ingests dual-domain telemetry (hardware sensors + application logs), engineers temporal features, trains an imbalanced classifier, and serves real-time failure predictions with SHAP-based explanations through a FastAPI service backed by PostgreSQL.
 
-The core problem it addresses: industrial monitoring systems generate too many false alerts. Operators start ignoring them. Real failures get missed. SentinelX brings the false positive rate from the 54% industry average down to 1.4% by combining cross-domain feature fusion, proper imbalance handling, and explainable predictions that operators can actually trust.
+The core problem it addresses: industrial monitoring systems generate too many false alerts. Operators start ignoring them. Real failures get missed. SentinelX combines cross-domain feature fusion, proper imbalance handling, and explainable predictions to make alerts operators can actually trust. On a held-out, chronological test split of the synthetic dataset (never seen during training), it reaches 70.5% precision and 87.2% recall at a fixed 0.5 threshold — see [Results](#project-summary) for the full, synthetic-data-labeled evaluation.
 
 The implementation is grounded in four research papers covering hybrid ML architectures, imbalanced classification, alert fatigue, and real-time data quality. See the [Literature](#literature) section for details.
 
@@ -15,26 +15,26 @@ The implementation is grounded in four research papers covering hybrid ML archit
 
 ## Project Summary
 
-The pipeline is built across 9 stages:
+The pipeline is built across 8 stages:
 
 | Stage | Component | What It Does |
 |-------|-----------|--------------|
 | 1 | Data Ingestion | Streaming pipeline with quality gates (Paper 4) |
-| 2 | Feature Engineering | 105+ features: rolling windows, lags, cross-domain fusion |
-| 3 | Model Training | XGBoost + SMOTE for 10:1 class imbalance |
-| 4 | Anomaly Detection | PyTorch autoencoder baseline comparison |
-| 5 | Evaluation | PR-AUC optimization, threshold calibration at 500K scale |
-| 6 | Diagnostic Agent | SHAP-powered explainability engine |
-| 7 | API + Persistence | FastAPI service + PostgreSQL with alert fatigue tracking |
-| 8 | Dashboard | Streamlit visualization of alert metrics and model performance |
-| 9 | LLM Agent | Ollama-powered generative diagnostics with chain-of-thought |
+| 2 | Feature Engineering | 124 features: rolling windows, lags, cross-domain fusion |
+| 3 | Model Training | XGBoost + SMOTE for 18:1 class imbalance |
+| 4 | Evaluation | One-shot evaluation on a chronological, per-machine holdout at a fixed threshold |
+| 5 | Diagnostic Agent | SHAP-powered explainability engine |
+| 6 | API + Persistence | FastAPI service + PostgreSQL with alert fatigue tracking |
+| 7 | Dashboard | Streamlit visualization of alert metrics and model performance |
+| 8 | LLM Agent | Ollama-powered generative diagnostics with chain-of-thought |
 
-**Results:**
-- 1.4% false positive rate (vs 54% industry baseline — Paper 3)
-- 97% reduction in alert fatigue
-- 95% failure detection recall
+**Results** (synthetic-data evaluation on a 10,000-row chronological holdout, never used for training or threshold tuning — see `models/evaluation_results.json`):
+- PR-AUC: 0.860
+- Precision: 70.5% | Recall: 87.2% | F1: 0.780 (at a fixed, untuned 0.5 threshold)
 - 65 end-to-end tests via Playwright (API + Dashboard)
 - Docker-ready with a documented AWS ECS migration path
+
+These numbers describe model performance on rule-generated synthetic data from 5 simulated machines, not a real industrial deployment.
 
 ---
 
@@ -88,15 +88,14 @@ Three services start:
 | 1 | `src/pipeline/stream_manager.py` | Data ingestion with quality gates |
 | 2 | `src/ml/feature_engineer.py` | Rolling windows, lags, cross-domain features |
 | 3 | `src/ml/train_model.py` | XGBoost + SMOTE for imbalanced data |
-| 4 | `src/ml/autoencoder.py` | Anomaly detection baseline |
-| 5 | `src/ml/evaluate_and_scale.py` | PR-AUC evaluation, threshold optimization |
-| 6 | `src/ml/agent.py` | SHAP-powered diagnostic engine |
-| 7 | `src/api/main.py` + `database.py` | FastAPI service + PostgreSQL |
-| 8 | `src/dashboard/dashboard.py` | Alert metrics and model performance dashboard |
+| 4 | `src/ml/evaluate_and_scale.py` | PR-AUC evaluation, threshold optimization |
+| 5 | `src/ml/agent.py` | SHAP-powered diagnostic engine |
+| 6 | `src/api/main.py` + `database.py` | FastAPI service + PostgreSQL |
+| 7 | `src/dashboard/dashboard.py` | Alert metrics and model performance dashboard |
 
 ---
 
-## LLM-Powered Diagnostics (Stage 9)
+## LLM-Powered Diagnostics
 
 The diagnostic agent wraps XGBoost predictions with SHAP analysis and sends them to a local Ollama instance for natural-language root cause generation. It falls back to rule-based diagnosis if Ollama is unavailable.
 
@@ -303,7 +302,7 @@ See [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) for the full walkthrough.
 
 The Streamlit dashboard at http://localhost:8501 includes:
 
-**Alert fatigue monitor** — tracks the 1.4% vs 54% FP rate comparison, acknowledgment rate, and false positive labeling over configurable time windows.
+**Alert fatigue monitor** — tracks the false positive rate, acknowledgment rate, and false positive labeling over configurable time windows.
 
 **Root cause breakdown** — distribution by failure mode (mechanical, thermal, software), risk level counts, and a 24-hour alert timeline.
 
@@ -323,12 +322,10 @@ SentinelX/
 │   │   ├── agent.py              Diagnostic engine (SHAP + LLM)
 │   │   ├── train_model.py        XGBoost + SMOTE training
 │   │   ├── feature_engineer.py   Feature transformation pipeline
-│   │   ├── autoencoder.py        Anomaly detection baseline
 │   │   └── evaluate_and_scale.py PR-AUC + threshold optimization
 │   ├── pipeline/
 │   │   ├── stream_manager.py     Data ingestion + quality gates
-│   │   ├── generate_synthetic_data.py
-│   │   └── analyze_logs.py
+│   │   └── generate_synthetic_data.py
 │   └── dashboard/
 │       └── dashboard.py
 │
@@ -349,12 +346,11 @@ SentinelX/
 │   ├── Dockerfile.api
 │   ├── Dockerfile.dashboard
 │   └── docker-compose.yml
-├── docs/                         AWS deployment guide, portfolio, technical design
+├── docs/                         AWS deployment guide, portfolio, project briefing
 ├── papers/                       Reference research papers (Papers 1–4)
 ├── scripts/
 │   └── run-tests.sh
-├── .github/workflows/            CI (ci.yml) and CD (cd.yml)
-├── TECHNICAL_DESIGN.md           End-to-end engineering reference document
+├── .github/workflows/            CI (ci.yml)
 ├── requirements.txt
 ├── pyproject.toml
 └── playwright.config.ts
@@ -388,7 +384,7 @@ SentinelX implements this protocol exactly: SMOTE is called inside each fold of 
 
 This paper quantifies the alert fatigue problem in production monitoring environments. It establishes that the industry average false positive rate in anomaly detection systems sits around 54%, and that at this level operators begin ignoring alerts systematically — with 73% of alerts going unacknowledged. The downstream effect is that genuine failures get missed not because the model failed to detect them, but because the operator no longer trusts the system. The paper proposes SHAP-based explanations as a trust-building mechanism: when operators understand why an alert fired, they engage with it more reliably.
 
-This directly shapes SentinelX's design goals (1.4% FP target), its database schema (the `acknowledged`, `false_positive`, and `action_taken` columns exist specifically to measure and track operator response), and the `/fatigue` API endpoint that surfaces acknowledgment rates and FP rates over time. The SHAP diagnostic report attached to every prediction is the implementation of the paper's explainability recommendation.
+This directly shapes SentinelX's design goal of a low false-positive rate, its database schema (the `acknowledged`, `false_positive`, and `action_taken` columns exist specifically to measure and track operator response), and the `/fatigue` API endpoint that surfaces acknowledgment rates and FP rates over time. The SHAP diagnostic report attached to every prediction is the implementation of the paper's explainability recommendation.
 
 ---
 

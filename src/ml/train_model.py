@@ -42,9 +42,11 @@ import xgboost as xgb
 from imblearn.over_sampling import SMOTE
 from sklearn.metrics import (
     average_precision_score,
+    confusion_matrix,
     f1_score,
+    precision_score,
+    recall_score,
 )
-from sklearn.model_selection import StratifiedKFold
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SentinelX.Trainer")
@@ -100,17 +102,42 @@ class TrainConfig:
         ]
     )
 
+    # --- Temporal Holdout ---
+    # WHY a chronological, per-machine holdout instead of a random split?
+    # Rolling/lag features (feature_engineer.py) make adjacent-in-time
+    # rows of the same machine highly correlated. A random row-level
+    # split (the previous approach) puts near-duplicate rows in both
+    # train and test, inflating performance. Holding out the LAST 20%
+    # of each machine's timeline mirrors real deployment (train on
+    # past, evaluate on future) and removes that leakage path.
+    holdout_frac: float = 0.2
+    timestamp_col: str = "timestamp"
+    group_col: str = "machine_id"
+
     # --- Cross-Validation ---
-    # WHY 5-Fold Stratified?
-    # - 5 folds = 80/20 train/val split per fold
-    # - Stratified: each fold preserves the 5.21% failure ratio
-    #   Without stratification, some folds might have 2% or 8% failures
-    #   by random chance — producing unreliable metric estimates.
-    # - 5 (not 10): With only 2,605 positives, 10-fold means ~260
-    #   positives per validation fold — borderline for PR-AUC stability.
-    #   5-fold gives ~521 positives per fold — more reliable.
+    # WHY 5 contiguous time-blocks per machine, forward-chaining (not
+    # shuffled KFold)?
+    # Same autocorrelation concern as the holdout: shuffling would mix
+    # adjacent timestamps across train/val within a fold. Each machine's
+    # portion of the dev set is cut into 5 contiguous chronological
+    # blocks. Fold i trains on blocks 0..i-1 and validates on block i —
+    # training always precedes validation in time (block 0 is never
+    # validated, since nothing precedes it), mirroring how the model
+    # would actually be deployed and retrained over time. This also
+    # means no embargo gap is needed at block boundaries: rolling/lag
+    # features are strictly backward-looking and were computed ONCE
+    # over each machine's full continuous timeline before any split, so
+    # a training block (always chronologically before its validation
+    # block here) cannot contain information derived from a later block.
     n_folds: int = 5
     random_state: int = 42
+
+    # --- Decision threshold ---
+    # WHY a fixed 0.5, not a tuned "optimal" threshold?
+    # Tuning the threshold on the same data used to report performance
+    # is itself a form of leakage/optimistic bias. 0.5 is reported as a
+    # plain, untuned baseline operating point.
+    decision_threshold: float = 0.5
 
     # --- SMOTE ---
     # WHY SMOTE over simple oversampling?
@@ -175,12 +202,9 @@ class TrainConfig:
 # - Logs feature count and class distribution for reproducibility
 
 
-def load_feature_matrix(config: TrainConfig) -> tuple[pd.DataFrame, pd.Series, list[str]]:
+def load_raw_matrix(config: TrainConfig) -> pd.DataFrame:
     """
-    Load the Golden Dataset and separate features from target.
-
-    Returns:
-        (X, y, feature_names): Features DataFrame, target Series, feature column names
+    Load the Golden Dataset, sorted chronologically within each machine.
     """
     path = Path(config.feature_matrix_path)
     if not path.exists():
@@ -192,13 +216,30 @@ def load_feature_matrix(config: TrainConfig) -> tuple[pd.DataFrame, pd.Series, l
     df = pd.read_parquet(path)
     logger.info(f"  → Shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
 
-    # --- Separate target ---
+    if "autoencoder_score" in df.columns:
+        # The autoencoder feature was removed from the pipeline (its
+        # measured contribution was negligible — see the ablation that
+        # justified removal). Drop any stale column left over from a
+        # feature_matrix.parquet written before that removal.
+        logger.warning("  Dropping stale 'autoencoder_score' column (feature removed)")
+        df = df.drop(columns=["autoencoder_score"])
+
     if config.target_col not in df.columns:
         raise ValueError(f"Target column '{config.target_col}' not found in feature matrix")
 
+    df = df.sort_values([config.group_col, config.timestamp_col]).reset_index(drop=True)
+    return df
+
+
+def prepare_X_y(df: pd.DataFrame, config: TrainConfig) -> tuple[pd.DataFrame, pd.Series, list[str]]:
+    """
+    Separate features/target from a (dev/holdout/fold) slice of the raw matrix.
+
+    Returns:
+        (X, y, feature_names): Features DataFrame, target Series, feature column names
+    """
     y = df[config.target_col].astype(int)
 
-    # --- Feature selection (exclude non-feature columns) ---
     feature_cols = [col for col in df.columns if col not in config.exclude_cols]
     X = df[feature_cols].copy()
 
@@ -209,6 +250,8 @@ def load_feature_matrix(config: TrainConfig) -> tuple[pd.DataFrame, pd.Series, l
     # Semantically, "no prior observation" = zero signal (no change,
     # no historical context). This is more interpretable than median
     # imputation and doesn't distort SMOTE's k-NN distance calculation.
+    # Filling with a constant is split-independent, so doing this
+    # separately per split introduces no leakage.
     #
     # WHY not drop rows?
     # Those first rows per machine are often "cold start" — healthy baseline.
@@ -216,21 +259,73 @@ def load_feature_matrix(config: TrainConfig) -> tuple[pd.DataFrame, pd.Series, l
     n_nan_before = X.isna().sum().sum()
     if n_nan_before > 0:
         X = X.fillna(0)
-        logger.info(
-            f"  NaN imputation: {n_nan_before:,} cells filled with 0 " f"(lag/rolling warm-up rows)"
-        )
+        logger.info(f"  NaN imputation: {n_nan_before:,} cells filled with 0 (lag/rolling warm-up)")
 
-    # --- Log class distribution ---
     n_pos = y.sum()
     n_neg = len(y) - n_pos
     ratio = n_neg / max(n_pos, 1)
-    logger.info(f"  Target: '{config.target_col}'")
-    logger.info(f"    Positive (failure=1): {n_pos:,} ({n_pos/len(y)*100:.2f}%)")
-    logger.info(f"    Negative (failure=0): {n_neg:,} ({n_neg/len(y)*100:.2f}%)")
-    logger.info(f"    Imbalance ratio: 1:{ratio:.0f}")
-    logger.info(f"  Features: {len(feature_cols)} columns")
+    logger.info(f"    Positive: {n_pos:,} ({n_pos/len(y)*100:.2f}%) | Negative: {n_neg:,} | 1:{ratio:.0f}")
 
     return X, y, feature_cols
+
+
+def split_dev_holdout(
+    df: pd.DataFrame, config: TrainConfig
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Chronological, per-machine dev/holdout split.
+
+    For each machine, the first (1 - holdout_frac) rows in time go to
+    `dev` (used for CV + final model training); the last holdout_frac
+    rows go to `holdout` (touched exactly once, at final evaluation).
+    """
+    dev_parts, holdout_parts = [], []
+    for _, group in df.groupby(config.group_col, sort=False):
+        group = group.sort_values(config.timestamp_col)
+        cutoff = int(len(group) * (1 - config.holdout_frac))
+        dev_parts.append(group.iloc[:cutoff])
+        holdout_parts.append(group.iloc[cutoff:])
+
+    df_dev = pd.concat(dev_parts).sort_values([config.group_col, config.timestamp_col])
+    df_holdout = pd.concat(holdout_parts).sort_values([config.group_col, config.timestamp_col])
+
+    for _, dev_group in df_dev.groupby(config.group_col):
+        machine = dev_group[config.group_col].iloc[0]
+        holdout_group = df_holdout[df_holdout[config.group_col] == machine]
+        if len(holdout_group) and dev_group[config.timestamp_col].max() >= holdout_group[
+            config.timestamp_col
+        ].min():
+            raise AssertionError(f"Temporal split violated for machine {machine}")
+
+    logger.info(
+        f"  Dev/Holdout split: {len(df_dev):,} dev rows / {len(df_holdout):,} holdout rows "
+        f"({len(df_holdout)/len(df)*100:.1f}% holdout, per machine)"
+    )
+    return df_dev, df_holdout
+
+
+def make_temporal_folds(df_dev: pd.DataFrame, config: TrainConfig) -> np.ndarray:
+    """
+    Assign each dev row to one of `n_folds` contiguous chronological
+    blocks WITHIN its own machine (block 0 = earliest, block n-1 = latest).
+
+    Used for FORWARD-CHAINING CV: fold i's validation set is block i,
+    and its training set is every block BEFORE it (blocks 0..i-1), never
+    a block after it. This guarantees training always precedes
+    validation in time, matching real deployment (the model is never
+    trained on data from the future relative to what it's evaluated
+    on). Block 0 is never used as a validation fold (there is nothing
+    before it to train on), so only folds 1..n_folds-1 are evaluated.
+    """
+    fold_ids = np.full(len(df_dev), -1, dtype=int)
+    for _, group in df_dev.groupby(config.group_col, sort=False):
+        idx = group.sort_values(config.timestamp_col).index
+        blocks = np.array_split(np.arange(len(idx)), config.n_folds)
+        for block_id, block_positions in enumerate(blocks):
+            fold_ids[df_dev.index.get_indexer(idx[block_positions])] = block_id
+
+    assert (fold_ids >= 0).all(), "Every dev row must be assigned to a fold"
+    return fold_ids
 
 
 # =============================================================================
@@ -259,63 +354,48 @@ def load_feature_matrix(config: TrainConfig) -> tuple[pd.DataFrame, pd.Series, l
 
 
 def train_with_cv(
-    X: pd.DataFrame, y: pd.Series, feature_names: list[str], config: TrainConfig
-) -> tuple[xgb.XGBClassifier, dict]:
+    df_dev: pd.DataFrame, config: TrainConfig
+) -> tuple[xgb.XGBClassifier, dict, list[str]]:
     """
-    Train XGBoost with Stratified K-Fold CV and per-fold SMOTE.
+    Train XGBoost with temporal-block, forward-chaining CV and per-fold SMOTE.
 
-    Architecture:
-    - Each fold: SMOTE(train) → XGBoost.fit → evaluate(real val)
-    - Early stopping on validation PR-AUC prevents overfitting
-    - Final model trained on full SMOTE'd dataset with best n_estimators
-
-    Args:
-        X: Feature matrix
-        y: Binary target (machine_failure)
-        feature_names: Column names for explainability
-        config: Training configuration
+    Architecture per fold:
+    - SMOTE(train) → XGBoost.fit → evaluate(real, unaugmented val)
+    Final model: trained on the full dev set (with SMOTE), using the
+    median best_n_trees from CV.
 
     Returns:
-        (best_model, metrics_dict): Trained model and CV metrics
+        (final_model, cv_summary, feature_names)
     """
-    skf = StratifiedKFold(n_splits=config.n_folds, shuffle=True, random_state=config.random_state)
+    fold_ids = make_temporal_folds(df_dev, config)
 
-    # --- Per-fold metrics storage ---
-    fold_metrics = {
-        "pr_auc": [],
-        "f1": [],
-        "precision": [],
-        "recall": [],
-        "best_n_trees": [],
-    }
+    fold_metrics = {"pr_auc": [], "f1": [], "precision": [], "recall": [], "best_n_trees": []}
 
     logger.info("=" * 60)
-    logger.info(f"Training: {config.n_folds}-Fold Stratified CV with SMOTE")
+    logger.info(f"Training: forward-chaining CV over {config.n_folds} temporal blocks (per machine)")
     logger.info("=" * 60)
 
-    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y)):
-        logger.info(f"\n--- Fold {fold_idx + 1}/{config.n_folds} ---")
+    # --- Forward-chaining: fold i trains on blocks 0..i-1, validates on
+    # block i. Block 0 is never validated (nothing precedes it), so folds
+    # run from 1 to n_folds-1 — this guarantees train always precedes
+    # validation in time for every fold, matching real deployment.
+    for fold_idx in range(1, config.n_folds):
+        logger.info(f"\n--- Fold {fold_idx}/{config.n_folds - 1} (train: blocks <{fold_idx}, val: block {fold_idx}) ---")
+        train_mask = fold_ids < fold_idx
+        val_mask = fold_ids == fold_idx
+        df_train_fold, df_val_fold = df_dev[train_mask], df_dev[val_mask]
 
-        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+        X_train, y_train, feature_cols = prepare_X_y(df_train_fold, config)
+        X_val, y_val, _ = prepare_X_y(df_val_fold, config)
 
         # --- SMOTE on training fold ONLY ---
-        # WHY here and not before the loop?
         # Paper 2's core safety rule: synthetic samples must NEVER
         # contaminate the validation set.
-        #
-        # What SMOTE does mathematically:
-        # 1. For each minority sample, find k=5 nearest minority neighbors
-        # 2. Randomly pick one neighbor
-        # 3. Create synthetic sample = original + random_fraction * (neighbor - original)
-        # This generates points ALONG the line between minority samples,
-        # filling in the minority region of feature space.
         smote = SMOTE(
             k_neighbors=config.smote_k_neighbors,
             sampling_strategy=config.smote_sampling_strategy,
-            random_state=config.random_state + fold_idx,  # Different seed per fold
+            random_state=config.random_state + fold_idx,
         )
-
         X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
 
         n_synthetic = len(X_train_resampled) - len(X_train)
@@ -323,21 +403,10 @@ def train_with_cv(
             f"  SMOTE: {len(X_train):,} → {len(X_train_resampled):,} "
             f"(+{n_synthetic:,} synthetic failures)"
         )
-        logger.info(
-            f"  Train class ratio after SMOTE: " f"{y_train_resampled.mean()*100:.1f}% positive"
-        )
 
-        # --- Train XGBoost with early stopping ---
-        # WHY early stopping on val set?
-        # We set n_estimators=500 as an UPPER BOUND.
-        # Early stopping finds the optimal point where validation PR-AUC
-        # plateaus. This prevents:
-        # - Overfitting to SMOTE's synthetic samples
-        # - Wasting compute on trees that don't improve generalization
         model = xgb.XGBClassifier(
             **config.xgb_params, early_stopping_rounds=config.early_stopping_rounds
         )
-
         model.fit(X_train_resampled, y_train_resampled, eval_set=[(X_val, y_val)], verbose=False)
 
         best_iteration = (
@@ -347,25 +416,9 @@ def train_with_cv(
         )
 
         # --- Evaluate on REAL (unaugmented) validation data ---
-        # WHY predict_proba, not predict?
-        # Binary predict uses threshold=0.5 by default.
-        # PR-AUC evaluates across ALL thresholds — more informative.
-        # In production, we'll tune the threshold based on the cost of
-        # false positives vs. missed failures.
         y_val_proba = model.predict_proba(X_val)[:, 1]
         y_val_pred = model.predict(X_val)
 
-        # --- Metrics ---
-        # PR-AUC (Average Precision):
-        # WHY PR-AUC over ROC-AUC?
-        # ROC-AUC can be deceivingly high for imbalanced data.
-        # With 95% negatives, a model predicting ALL zeros gets:
-        #   ROC-AUC: ~0.50 (random)
-        #   PR-AUC: ~0.05 (reveals the true failure to detect positives)
-        #
-        # Paper 3: "In industrial systems with <5% failure rate,
-        # PR-AUC is the only metric that honestly reflects
-        # the model's ability to find the needle in the haystack."
         pr_auc = average_precision_score(y_val, y_val_proba)
         f1 = f1_score(y_val, y_val_pred)
         precision = (y_val_pred & y_val).sum() / max(y_val_pred.sum(), 1)
@@ -379,13 +432,12 @@ def train_with_cv(
 
         logger.info(
             f"  Results: PR-AUC={pr_auc:.4f}, F1={f1:.4f}, "
-            f"Precision={precision:.4f}, Recall={recall:.4f}, "
-            f"Trees={best_iteration}"
+            f"Precision={precision:.4f}, Recall={recall:.4f}, Trees={best_iteration}"
         )
 
     # --- Aggregate CV Metrics ---
     logger.info("\n" + "=" * 60)
-    logger.info("CROSS-VALIDATION SUMMARY")
+    logger.info("CROSS-VALIDATION SUMMARY (temporal blocks)")
     logger.info("=" * 60)
     cv_summary = {}
     for metric, values in fold_metrics.items():
@@ -395,35 +447,84 @@ def train_with_cv(
         cv_summary[f"{metric}_std"] = std
         logger.info(f"  {metric:<15}: {mean:.4f} ± {std:.4f}")
 
-    # --- Train Final Model on Full Data ---
-    # WHY retrain on all data?
-    # CV gave us reliable metric ESTIMATES. Now we want the best possible
-    # model for production — trained on ALL available data.
-    # We use the median best_n_trees from CV as our stopping point.
-    logger.info("\nTraining final model on full dataset (with SMOTE)...")
+    # --- Train Final Model on Full Dev Set ---
+    # WHY the dev set, not dev+holdout?
+    # The holdout must remain genuinely unseen by anything that
+    # produces the shipped model, so final training uses dev only.
+    logger.info("\nTraining final model on full dev set (with SMOTE)...")
     optimal_n_trees = int(np.median(fold_metrics["best_n_trees"]))
     logger.info(f"  Using n_estimators={optimal_n_trees} (median from CV)")
+
+    X_dev, y_dev, feature_names = prepare_X_y(df_dev, config)
 
     smote_final = SMOTE(
         k_neighbors=config.smote_k_neighbors,
         sampling_strategy=config.smote_sampling_strategy,
         random_state=config.random_state,
     )
-    X_full_resampled, y_full_resampled = smote_final.fit_resample(X, y)
+    X_dev_resampled, y_dev_resampled = smote_final.fit_resample(X_dev, y_dev)
 
     final_params = config.xgb_params.copy()
     final_params["n_estimators"] = optimal_n_trees
-    # Remove early stopping for final training (we already know optimal trees)
     final_params.pop("eval_metric", None)
 
     final_model = xgb.XGBClassifier(**final_params)
-    final_model.fit(X_full_resampled, y_full_resampled, verbose=False)
+    final_model.fit(X_dev_resampled, y_dev_resampled, verbose=False)
 
     logger.info(
-        f"  Final model trained: {optimal_n_trees} trees, " f"{final_model.n_features_in_} features"
+        f"  Final model trained: {optimal_n_trees} trees, {final_model.n_features_in_} features"
     )
 
-    return final_model, cv_summary
+    return final_model, cv_summary, feature_names
+
+
+def evaluate_on_holdout(
+    model: xgb.XGBClassifier,
+    df_holdout: pd.DataFrame,
+    config: TrainConfig,
+) -> dict:
+    """
+    One-shot evaluation of the FINAL shipped model on the genuinely
+    held-out, never-before-used test set, at a fixed, untuned threshold.
+    """
+    X_holdout, y_holdout, feature_cols = prepare_X_y(df_holdout, config)
+
+    y_proba = model.predict_proba(X_holdout)[:, 1]
+    y_pred = (y_proba >= config.decision_threshold).astype(int)
+
+    tn, fp, fn, tp = confusion_matrix(y_holdout, y_pred).ravel()
+
+    results = {
+        "synthetic_data_evaluation": True,
+        "note": (
+            "Evaluated on synthetic, rule-generated data from 5 simulated "
+            "machines, on a chronological per-machine holdout never used "
+            "for training, feature selection, or threshold tuning. These "
+            "numbers do NOT demonstrate real-world generalization."
+        ),
+        "n_holdout_rows": int(len(df_holdout)),
+        "decision_threshold": config.decision_threshold,
+        "pr_auc": float(average_precision_score(y_holdout, y_proba)),
+        "f1": float(f1_score(y_holdout, y_pred)),
+        "precision": float(precision_score(y_holdout, y_pred, zero_division=0)),
+        "recall": float(recall_score(y_holdout, y_pred, zero_division=0)),
+        "confusion_matrix": {
+            "tn": int(tn),
+            "fp": int(fp),
+            "fn": int(fn),
+            "tp": int(tp),
+        },
+    }
+    logger.info("\n" + "=" * 60)
+    logger.info("HOLDOUT EVALUATION (synthetic data; fixed threshold=0.5)")
+    logger.info("=" * 60)
+    logger.info(f"  PR-AUC:    {results['pr_auc']:.4f}")
+    logger.info(f"  F1:        {results['f1']:.4f}")
+    logger.info(f"  Precision: {results['precision']:.4f}")
+    logger.info(f"  Recall:    {results['recall']:.4f}")
+    logger.info(f"  Confusion matrix: TN={tn} FP={fp} FN={fn} TP={tp}")
+
+    return results
 
 
 # =============================================================================
@@ -541,21 +642,23 @@ def save_model_artifacts(
     model: xgb.XGBClassifier,
     feature_names: list[str],
     cv_metrics: dict,
+    holdout_metrics: dict,
     config: TrainConfig,
     output_dir: Path,
 ) -> None:
     """
-    Save all model artifacts for production deployment.
+    Save all model and evaluation artifacts from THIS run.
 
     Artifacts saved:
-    - model.joblib: Serialized XGBoost model
+    - model.joblib: Serialized XGBoost model (final, dev-set-only)
     - feature_names.json: Ordered list of expected features
     - training_config.json: Full training configuration
-    - cv_metrics.json: Cross-validation performance metrics
+    - cv_metrics.json: Temporal-block CV performance estimates
+    - evaluation_results.json: One-shot holdout evaluation (see note field)
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- Model ---
+    # --- XGBoost Model ---
     model_path = output_dir / "model.joblib"
     joblib.dump(model, model_path)
     model_size_mb = model_path.stat().st_size / (1024 * 1024)
@@ -571,8 +674,10 @@ def save_model_artifacts(
     config_path = output_dir / "training_config.json"
     config_dict = {
         "target_col": config.target_col,
+        "holdout_frac": config.holdout_frac,
         "n_folds": config.n_folds,
         "random_state": config.random_state,
+        "decision_threshold": config.decision_threshold,
         "smote_k_neighbors": config.smote_k_neighbors,
         "smote_sampling_strategy": config.smote_sampling_strategy,
         "xgb_params": config.xgb_params,
@@ -589,6 +694,12 @@ def save_model_artifacts(
         json.dump(cv_metrics, f, indent=2, default=float)
     logger.info(f"CV metrics saved: {metrics_path}")
 
+    # --- Holdout Evaluation ---
+    eval_path = output_dir / "evaluation_results.json"
+    with open(eval_path, "w") as f:
+        json.dump(holdout_metrics, f, indent=2, default=float)
+    logger.info(f"Holdout evaluation saved: {eval_path}")
+
 
 # =============================================================================
 # 6. PIPELINE ORCHESTRATOR
@@ -597,7 +708,9 @@ def save_model_artifacts(
 
 def run_training_pipeline(config: TrainConfig | None = None) -> Path:
     """
-    Execute the full training pipeline: Load → SMOTE+CV → SHAP → Save.
+    Execute the full training pipeline:
+    Load → Dev/Holdout split → CV (SMOTE per fold) →
+    Final model (dev-only) → SHAP → Holdout evaluation → Save.
 
     Args:
         config: Training configuration (uses defaults if None)
@@ -615,21 +728,27 @@ def run_training_pipeline(config: TrainConfig | None = None) -> Path:
     logger.info("SentinelX Stage 3: Model Training & Explainability")
     logger.info("=" * 60)
 
-    # --- Step 1: Load Data ---
-    logger.info("\nStep 1/4: Loading Golden Dataset")
-    X, y, feature_names = load_feature_matrix(config)
+    # --- Step 1: Load + Split ---
+    logger.info("\nStep 1/5: Loading Golden Dataset and splitting dev/holdout")
+    df = load_raw_matrix(config)
+    df_dev, df_holdout = split_dev_holdout(df, config)
 
-    # --- Step 2: Train with CV ---
-    logger.info("\nStep 2/4: Training with Stratified K-Fold + SMOTE")
-    model, cv_metrics = train_with_cv(X, y, feature_names, config)
+    # --- Step 2: Train with temporal-block CV ---
+    logger.info("\nStep 2/5: Training with temporal-block CV + SMOTE")
+    model, cv_metrics, feature_names = train_with_cv(df_dev, config)
 
-    # --- Step 3: SHAP Analysis ---
-    logger.info("\nStep 3/4: SHAP Explainability Analysis")
-    compute_shap_analysis(model, X, feature_names, output_dir)
+    # --- Step 3: SHAP Analysis (on the dev set actually used to train) ---
+    logger.info("\nStep 3/5: SHAP Explainability Analysis")
+    X_dev, y_dev, _ = prepare_X_y(df_dev, config)
+    compute_shap_analysis(model, X_dev, feature_names, output_dir)
 
-    # --- Step 4: Save Artifacts ---
-    logger.info("\nStep 4/4: Saving Model Artifacts")
-    save_model_artifacts(model, feature_names, cv_metrics, config, output_dir)
+    # --- Step 4: Holdout Evaluation (one shot, never used until now) ---
+    logger.info("\nStep 4/5: Evaluating final model on the held-out test set")
+    holdout_metrics = evaluate_on_holdout(model, df_holdout, config)
+
+    # --- Step 5: Save Artifacts ---
+    logger.info("\nStep 5/5: Saving Model/Evaluation Artifacts")
+    save_model_artifacts(model, feature_names, cv_metrics, holdout_metrics, config, output_dir)
 
     # --- Final Report ---
     logger.info("\n" + "=" * 60)
@@ -637,8 +756,11 @@ def run_training_pipeline(config: TrainConfig | None = None) -> Path:
     logger.info("=" * 60)
     logger.info(f"  Model:     {output_dir / 'model.joblib'}")
     logger.info(f"  Features:  {len(feature_names)} columns")
-    logger.info(f"  PR-AUC:    {cv_metrics['pr_auc_mean']:.4f} ± {cv_metrics['pr_auc_std']:.4f}")
-    logger.info(f"  F1-Score:  {cv_metrics['f1_mean']:.4f} ± {cv_metrics['f1_std']:.4f}")
+    logger.info(f"  CV PR-AUC: {cv_metrics['pr_auc_mean']:.4f} ± {cv_metrics['pr_auc_std']:.4f}")
+    logger.info(
+        f"  Holdout:   PR-AUC={holdout_metrics['pr_auc']:.4f} F1={holdout_metrics['f1']:.4f} "
+        f"(synthetic data, threshold={config.decision_threshold})"
+    )
     logger.info(f"  SHAP:      Top features saved to {output_dir / 'shap_importance.json'}")
 
     return output_dir
